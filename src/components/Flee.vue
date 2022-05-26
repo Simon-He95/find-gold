@@ -40,18 +40,16 @@ window.addEventListener("keydown", (e) => {
 let startX = null;
 let startY = null;
 window.addEventListener("touchstart", (e) => {
-  console.log("22", e);
   const { clientX, clientY } = e.changedTouches[0];
   startX = clientX;
   startY = clientY;
 });
-window.addEventListener(
+document.body.addEventListener(
   "touchmove",
   throttle((e) => {
     e.preventDefault();
     const { clientX, clientY } = e.changedTouches[0];
     let timer = setTimeout(() => {});
-    console.log(clientX, clientY, startX, startY);
     if (clientX > startX && rightMove()) {
       changeShow();
     }
@@ -64,7 +62,8 @@ window.addEventListener(
     if (clientY < startY && topMove()) {
       changeShow();
     }
-  })
+  }),
+  { passive: false }
 );
 
 function throttle(fn) {
@@ -85,31 +84,44 @@ function changeShow() {
     return item;
   });
 }
+
+const now = $(useNow());
+const start = ref(Date.now());
+let win = $ref(false);
+
+const countDown = $computed(() => Math.round((+now - start.value) / 1000));
+
 const number = computed(() => {
   if (!goldArray.value.length) return;
   const result = goldArray.value.filter((item) => item.show).length;
-  if (result === 0) {
-    alert("你找到了所有的金币!");
+  if (result === 0 && !win) {
+    win = true;
+    alert(`你找到了所有的金币!用时间${countDown}秒`);
   }
   return result;
 });
 </script>
 
 <template>
-  <div flex="~" justify-center items-end m-b-5>
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden="true"
-      role="img"
-      preserveAspectRatio="xMidYMid meet"
-      viewBox="0 0 24 24"
-      w-8
-    >
-      <path
-        fill="gold"
-        d="m1 22l1.5-5h7l1.5 5H1m12 0l1.5-5h7l1.5 5H13m-7-7l1.5-5h7l1.5 5H6m17-8.95l-3.86 1.09L18.05 11l-1.09-3.86l-3.86-1.09l3.86-1.09l1.09-3.86l1.09 3.86L23 6.05Z"
-      /></svg
-    ><span text-xl m-l-2>: {{ number }}</span>
+  <div flex="~ gap-5" justify-center items-end m-b-5 overflow-hidden>
+    <div font-mono="" text-xl="" flex="~ gap-2" items-center="" justify="center" m-t-5="">
+      <div i-carbon-timer=""></div>
+      {{ countDown }}
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        aria-hidden="true"
+        role="img"
+        preserveAspectRatio="xMidYMid meet"
+        viewBox="0 0 24 24"
+        w-6
+      >
+        <path
+          fill="gold"
+          d="m1 22l1.5-5h7l1.5 5H1m12 0l1.5-5h7l1.5 5H13m-7-7l1.5-5h7l1.5 5H6m17-8.95l-3.86 1.09L18.05 11l-1.09-3.86l-3.86-1.09l3.86-1.09l1.09-3.86l1.09 3.86L23 6.05Z"
+        />
+      </svg>
+      {{ number }}
+    </div>
   </div>
 
   <div ref="FleeEl" relative overflow="hidden">
