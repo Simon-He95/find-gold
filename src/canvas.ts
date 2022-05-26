@@ -1,4 +1,4 @@
-const WIDTH = window.outerWidth
+const WIDTH = window.outerWidth > 600 ? 600 : window.outerWidth
 const HEIGHT = WIDTH
 export const w = HEIGHT / 10
 const grid: any[] = []
