@@ -48,6 +48,7 @@ window.addEventListener("touchstart", (e) => {
 window.addEventListener(
   "touchmove",
   throttle((e) => {
+    e.preventDefault();
     const { clientX, clientY } = e.changedTouches[0];
     let timer = setTimeout(() => {});
     console.log(clientX, clientY, startX, startY);
