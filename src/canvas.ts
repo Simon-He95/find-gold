@@ -1,6 +1,6 @@
 const WIDTH = window.outerWidth
 const HEIGHT = WIDTH
-const w = HEIGHT / 10
+export const w = HEIGHT / 10
 const grid: any[] = []
 const canvas: HTMLCanvasElement = document.createElement('canvas')
 const ctx: CanvasRenderingContext2D = canvas.getContext('2d')!

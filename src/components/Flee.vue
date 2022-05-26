@@ -10,6 +10,7 @@ import {
   initMask,
   getGold,
   update,
+  w,
 } from "../canvas";
 const FleeEl = ref(null);
 let canvas = setup();
@@ -101,19 +102,19 @@ const number = computed(() => {
       role="img"
       preserveAspectRatio="xMidYMid meet"
       viewBox="0 0 24 24"
-      :style="{ width: '37.5px' }"
+      w-8
     >
       <path
         fill="gold"
         d="m1 22l1.5-5h7l1.5 5H1m12 0l1.5-5h7l1.5 5H13m-7-7l1.5-5h7l1.5 5H6m17-8.95l-3.86 1.09L18.05 11l-1.09-3.86l-3.86-1.09l3.86-1.09l1.09-3.86l1.09 3.86L23 6.05Z"
       /></svg
-    ><span text-2xl m-l-2>:{{ number }}</span>
+    ><span text-xl m-l-2>: {{ number }}</span>
   </div>
 
   <div ref="FleeEl" relative overflow="hidden">
     <svg
       absolute
-      :style="{ width: '37.5px', left: imgLeft + 'px', top: imgTop + 'px' }"
+      :style="{ width: w + 'px', left: imgLeft + 'px', top: imgTop + 'px' }"
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden="true"
       role="img"
@@ -134,7 +135,7 @@ const number = computed(() => {
         preserveAspectRatio="xMidYMid meet"
         viewBox="0 0 24 24"
         v-if="item.show"
-        :style="{ width: '37.5px', left: item.x + 'px', top: item.y + 'px' }"
+        :style="{ width: w + 'px', left: item.x + 'px', top: item.y + 'px' }"
         absolute
       >
         <path
