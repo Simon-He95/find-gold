@@ -3,6 +3,7 @@ const HEIGHT = WIDTH
 export const w = HEIGHT / 10
 const grid: any[] = []
 const canvas: HTMLCanvasElement = document.createElement('canvas')
+canvas.style = "margin: 0 auto;"
 const ctx: CanvasRenderingContext2D = canvas.getContext('2d')!
 canvas.width = WIDTH
 canvas.height = HEIGHT
@@ -17,7 +18,7 @@ export const mask: HTMLCanvasElement = document.createElement("canvas");
 const maskCtx = mask.getContext("2d")!;
 let maskX = 0
 let maskY = 0
-const range = w * 2
+const range = w * 1.5
 
 // golds
 export const n = ref(5)
@@ -229,8 +230,9 @@ export function downMove() {
 }
 
 export function initMask() {
-  mask.width = 3 * WIDTH;
-  mask.height = 3 * WIDTH;
+
+  mask.width = 2 * WIDTH;
+  mask.height = 2 * WIDTH;
   drawCircle(WIDTH + w / 2, WIDTH + w / 2, range)
   mask.style = `position:absolute;left:-${WIDTH}px;top:-${WIDTH}px;z-index:10;`
   return mask

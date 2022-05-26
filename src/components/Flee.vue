@@ -103,8 +103,8 @@ const number = computed(() => {
 </script>
 
 <template>
-  <div flex="~ gap-5" justify-center items-end m-b-5 overflow-hidden>
-    <div font-mono="" text-xl="" flex="~ gap-2" items-center="" justify="center" m-t-5="">
+  <div flex="~ gap-5" justify-center items-end m-b-5 overflow-hidden max-w-150 ma>
+    <div flex="~ gap-2" items-center="" justify="center" m-t-5="">
       <div i-carbon-timer=""></div>
       {{ countDown }}
       <svg
@@ -124,7 +124,7 @@ const number = computed(() => {
     </div>
   </div>
 
-  <div ref="FleeEl" relative overflow="hidden">
+  <div ref="FleeEl" relative overflow="hidden" max-w-150 ma>
     <svg
       absolute
       :style="{ width: w + 'px', left: imgLeft + 'px', top: imgTop + 'px' }"
