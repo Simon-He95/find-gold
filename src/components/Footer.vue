@@ -14,7 +14,7 @@ isDark.value = true;
       class="icon-btn"
       i-carbon-logo-github
       rel="noreferrer"
-      href="https://github.com/Simon-He95/my-vitesse-app"
+      href="https://github.com/Simon-He95/find-gold"
       target="_blank"
       title="GitHub"
     />
