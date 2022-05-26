@@ -51,17 +51,17 @@ window.addEventListener(
     const { clientX, clientY } = e.changedTouches[0];
     let timer = setTimeout(() => {});
     console.log(clientX, clientY, startX, startY);
-    if (clientX > startX) {
-      rightMove();
+    if (clientX > startX && rightMove()) {
+      changeShow();
     }
-    if (clientX < startX) {
-      leftMove();
+    if (clientX < startX && leftMove()) {
+      changeShow();
     }
-    if (clientY > startY) {
-      downMove();
+    if (clientY > startY && downMove()) {
+      changeShow();
     }
-    if (clientY < startY) {
-      topMove();
+    if (clientY < startY && topMove()) {
+      changeShow();
     }
   })
 );
