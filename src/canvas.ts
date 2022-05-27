@@ -3,7 +3,7 @@ const HEIGHT = WIDTH
 export const w = HEIGHT / 10
 const grid: any[] = []
 const canvas: HTMLCanvasElement = document.createElement('canvas')
-canvas.style = "margin: 0 auto;"
+canvas.setAttribute('style', "margin: 0 auto;")
 const ctx: CanvasRenderingContext2D = canvas.getContext('2d')!
 canvas.width = WIDTH
 canvas.height = HEIGHT
@@ -18,39 +18,46 @@ export const mask: HTMLCanvasElement = document.createElement("canvas");
 const maskCtx = mask.getContext("2d")!;
 let maskX = 0
 let maskY = 0
-const range = w * 1.5
 
 // golds
-export const n = ref(5)
+export const n = ref(1)
 export const golds: any[] = []
+export const goldArray = ref<any[]>([]);
+export const start = ref();
+export const win = ref(false)
+const range = computed(() => w * 3 / n.value)
+const stacks: Cell[] = []
+
 
 export function setup() {
+  ctx.clearRect(0, 0, WIDTH, HEIGHT)
+  imgLeft.value = 0
+  imgTop.value = 0
+  stacks.length = 0
+  win.value = false
+  grid.length = 0
+  golds.length = 0
+  ctx.clearRect(0, 0, WIDTH, HEIGHT)
   ctx.fillStyle = '#000'
   ctx.fillRect(0, 0, WIDTH, HEIGHT)
-  return update()
-}
-
-export function update() {
-  grid.length = 0
-  maskX = 0
-  maskY = 0
   for (let i = 0; i < cols; i++) {
     for (let j = 0; j < rows; j++) {
       const cell = new Cell(j, i)
       grid.push(cell)
     }
   }
-
   current = grid[0]
-
   draw()
+  goldArray.value = getGold()
+  start.value = Date.now()
   return canvas
+
 }
 
 class Cell {
   i: number
   j: number
-  walls: boolean[] = [true, true, true, false]
+  walls: boolean[] = [true, true, true, true]
   visited: boolean = false
   constructor(i: number, j: number) {
     this.i = i
@@ -69,6 +76,7 @@ class Cell {
       this.line(x + w, y, x + w, y + w);
   }
   line(x: number, y: number, x2: number, y2: number) {
+    ctx.beginPath()
     ctx.moveTo(x, y);
     ctx.lineTo(x2, y2);
     ctx.strokeStyle = '#fff'
@@ -117,10 +125,7 @@ function draw() {
       findFar(grid[i], center)
     }
   }
-
   for (let i = 0; i < grid.length; i++) {
-    if (i > 0)
-      grid[i].visited = false
     grid[i].show()
   }
 }
@@ -145,7 +150,6 @@ function removeWalls(a: Cell, b: Cell) {
 
 function findFar(start: Cell, target: Cell, map = new Set) {
   const queue: any[] = [start]
-  const stacks = []
   while (queue.length) {
     const current = queue.shift()
     if (map.has(current)) {
@@ -160,12 +164,11 @@ function findFar(start: Cell, target: Cell, map = new Set) {
     const next = current.checkNeighbors()
     if (next) {
       removeWalls(current, next)
+      golds.push(current)
       stacks.push(current)
       queue.push(next)
+
     } else {
-      if (target === grid[grid.length - 1] && current.i > rows / 2 || current.j > cols / 2) {
-        golds.push(current)
-      }
       const pre = stacks.pop()
       if (pre) {
         map.delete(pre)
@@ -174,8 +177,9 @@ function findFar(start: Cell, target: Cell, map = new Set) {
     }
   }
   stacks.length && stacks.reduce((pre, cur) => {
-    if (pre && cur)
+    if (pre && cur) {
       removeWalls(pre, cur)
+    }
     return cur
   })
 }
@@ -229,17 +233,20 @@ export function downMove() {
   return true
 }
 
-export function initMask() {
+let stepClear = 1;
 
+export function initMask() {
+  maskX = 0
+  maskY = 0
+  stepClear = 1
   mask.width = 2 * WIDTH;
   mask.height = 2 * WIDTH;
-  drawCircle(WIDTH + w / 2, WIDTH + w / 2, range)
-  mask.style = `position:absolute;left:-${WIDTH}px;top:-${WIDTH}px;z-index:10;`
+  drawCircle(WIDTH + w / 2, WIDTH + w / 2, range.value)
+  mask.setAttribute('style', `position:absolute;left:-${WIDTH}px;top:-${WIDTH}px;z-index:10;`)
   return mask
 
 }
 
-let stepClear = 1;
 
 function clearArc(x: number, y: number, radius: number) {
   const calWidth = radius - stepClear;
@@ -256,8 +263,9 @@ function clearArc(x: number, y: number, radius: number) {
 }
 
 function drawCircle(x: number, y: number, r: number) {
+  maskCtx.clearRect(0, 0, 2 * WIDTH, 2 * WIDTH)
   maskCtx.fillStyle = "#000";
-  maskCtx.fillRect(0, 0, 3 * WIDTH, 3 * WIDTH);
+  maskCtx.fillRect(0, 0, 2 * WIDTH, 2 * WIDTH);
   clearArc(x, y, r);
   maskCtx.lineWidth = 1
   maskCtx.strokeStyle = 'rgba(255,255,255,0.2)'
@@ -276,7 +284,10 @@ export function getGold() {
   });
 }
 function randomGold() {
-  const result: any[] = []
+  let left: Cell = grid[grid.length - rows],
+    right: Cell = grid[rows - 1]
+  const result: any[] = n.value > 3 ? [grid[grid.length - 1], left, right] : []
+
   if (golds.length < n.value) {
     return [
       { i: 5, j: 5 },
@@ -286,9 +297,11 @@ function randomGold() {
       { i: 7, j: 3 }
     ]
   }
-  for (let i = 0; i < n.value; i++) {
-    const index = Math.floor(Math.random() * golds.length - 1)
-    const gold = golds[index]
+  const statement = n.value > 3 ? n.value - 3 : n.value
+  for (let i = 0; i < statement; i++) {
+    const center = golds.filter(item => item.i > rows / 4 && item.i < rows * 3 / 4 && item.j > cols / 4 && item.j < cols * 3 / 4)
+    const index = Math.floor(Math.random() * center.length)
+    const gold = center[index]
     if (gold && !result.includes(gold))
       result.push(gold)
     else {

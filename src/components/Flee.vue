@@ -9,20 +9,23 @@ import {
   imgTop,
   initMask,
   getGold,
-  update,
   w,
+  goldArray,
+  start,
+  win,
+  n,
 } from "../canvas";
 const FleeEl = ref(null);
 let canvas = setup();
 const mask = initMask();
-const goldArray = ref([]);
 
+const animate = $ref(false);
 onMounted(() => {
   FleeEl.value.appendChild(canvas);
   FleeEl.value.appendChild(mask);
-  goldArray.value = getGold();
 });
-window.addEventListener("keydown", (e) => {
+window.addEventListener("keydown", keydown);
+function keydown(e) {
   if (e.keyCode === 40 && downMove()) {
     // down
     changeShow();
@@ -36,17 +39,20 @@ window.addEventListener("keydown", (e) => {
     // right
     changeShow();
   }
-});
+}
 let startX = null;
 let startY = null;
-window.addEventListener("touchstart", (e) => {
+window.addEventListener("touchstart", touchstart);
+function touchstart(e) {
   const { clientX, clientY } = e.changedTouches[0];
   startX = clientX;
   startY = clientY;
-});
-document.body.addEventListener(
-  "touchmove",
-  throttle((e) => {
+}
+document.body.addEventListener("touchmove", touchmove(), { passive: false });
+
+function touchmove() {
+  const fn = throttle((e) => {
+    console.log(e);
     e.preventDefault();
     const { clientX, clientY } = e.changedTouches[0];
     let timer = setTimeout(() => {});
@@ -62,9 +68,15 @@ document.body.addEventListener(
     if (clientY < startY && topMove()) {
       changeShow();
     }
-  }),
-  { passive: false }
-);
+  });
+  return fn;
+}
+
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", keydown);
+  document.body.removeEventListener("touchmove", touchmove());
+  window.removeEventListener("touchstart", touchstart);
+});
 
 function throttle(fn) {
   let flag = false;
@@ -80,23 +92,30 @@ function throttle(fn) {
 
 function changeShow() {
   goldArray.value = goldArray.value.map((item) => {
-    if (item.x === imgLeft.value && item.y === imgTop.value) item.show = false;
+    if (item.x === imgLeft.value && item.y === imgTop.value) {
+      animate = true;
+      item.show = false;
+      setTimeout(() => {
+        animate = false;
+      }, 500);
+    }
     return item;
   });
 }
 
 const now = $(useNow());
-const start = ref(Date.now());
-let win = $ref(false);
 
 const countDown = $computed(() => Math.round((+now - start.value) / 1000));
 
 const number = computed(() => {
   if (!goldArray.value.length) return;
   const result = goldArray.value.filter((item) => item.show).length;
-  if (result === 0 && !win) {
-    win = true;
-    alert(`你找到了所有的金币!用时间${countDown}秒`);
+  if (result === 0 && !win.value) {
+    win.value = true;
+    n.value++;
+    alert(`你找到了所有的金币!用时间${countDown}秒, Level: ${n.value}`);
+    setup();
+    initMask();
   }
   return result;
 });
@@ -114,6 +133,7 @@ const number = computed(() => {
         preserveAspectRatio="xMidYMid meet"
         viewBox="0 0 24 24"
         w-6
+        :class="animate && 'animate-heart-beat'"
       >
         <path
           fill="gold"
@@ -148,6 +168,8 @@ const number = computed(() => {
         preserveAspectRatio="xMidYMid meet"
         viewBox="0 0 24 24"
         v-if="item.show"
+        animate-zoom-in
+        animate-duration-700
         :style="{ width: w + 'px', left: item.x + 'px', top: item.y + 'px' }"
         absolute
       >
