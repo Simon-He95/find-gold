@@ -52,10 +52,8 @@ document.body.addEventListener("touchmove", touchmove(), { passive: false });
 
 function touchmove() {
   const fn = throttle((e) => {
-    console.log(e);
     e.preventDefault();
     const { clientX, clientY } = e.changedTouches[0];
-    let timer = setTimeout(() => {});
     if (clientX > startX && rightMove()) {
       changeShow();
     }
@@ -113,17 +111,41 @@ const number = computed(() => {
   if (result === 0 && !win.value) {
     win.value = true;
     n.value++;
-    alert(`你找到了所有的金币!用时间${countDown}秒, Level: ${n.value}`);
+    alert(`你找到了所有的金币!用时间${countDown}秒, Level Up !!!`);
     setup();
     initMask();
   }
   return result;
 });
+
+function restart() {
+  const isTrue = window.confirm("是否要重新从level 1 开始游戏 ?");
+  if (!isTrue) {
+    return;
+  }
+  n.value = 1;
+  setup();
+  initMask();
+}
 </script>
 
 <template>
   <div flex="~ gap-5" justify-center items-end m-b-5 overflow-hidden max-w-150 ma>
     <div flex="~ gap-2" items-center="" justify="center" m-t-5="">
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        aria-hidden="true"
+        role="img"
+        preserveAspectRatio="xMidYMid meet"
+        viewBox="0 0 32 32"
+        w-5
+        @click="restart"
+      >
+        <path
+          fill="currentColor"
+          d="M26 18A10 10 0 1 1 16 8h6.182l-3.584 3.585L20 13l6-6l-6-6l-1.402 1.414L22.185 6H16a12 12 0 1 0 12 12Z"
+        />
+      </svg>
       <div i-carbon-timer=""></div>
       {{ countDown }}
       <svg
@@ -132,7 +154,7 @@ const number = computed(() => {
         role="img"
         preserveAspectRatio="xMidYMid meet"
         viewBox="0 0 24 24"
-        w-6
+        w-5
         :class="animate && 'animate-heart-beat'"
       >
         <path
@@ -141,6 +163,20 @@ const number = computed(() => {
         />
       </svg>
       {{ number }}
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        aria-hidden="true"
+        role="img"
+        w-5
+        preserveAspectRatio="xMidYMid meet"
+        viewBox="0 0 32 32"
+      >
+        <path
+          fill="currentColor"
+          d="M21 24H11a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2zm0 4H11v-2h10zm7.707-13.707l-12-12a1 1 0 0 0-1.414 0l-12 12A1 1 0 0 0 4 16h5v4a2.002 2.002 0 0 0 2 2h10a2.003 2.003 0 0 0 2-2v-4h5a1 1 0 0 0 .707-1.707zM21 14v6H11v-6H6.414L16 4.414L25.586 14z"
+        />
+      </svg>
+      {{ n }}
     </div>
   </div>
 
