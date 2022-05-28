@@ -31,7 +31,7 @@ watch(hideMask, (newV) => {
 });
 onMounted(() => {
   FleeEl.value.appendChild(canvas);
-  // FleeEl.value.appendChild(mask);
+  FleeEl.value.appendChild(mask);
 });
 window.addEventListener("keydown", keydown);
 function keydown(e) {
