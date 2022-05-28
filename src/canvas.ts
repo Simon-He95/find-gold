@@ -441,7 +441,11 @@ function pushGift(result: any[]) {
       })
     randomImage.push(src)
   }
-  console.log(gift.value)
+  // 预加载图片
+  gift.value.forEach(img => {
+    const image = document.createElement('img')
+    image.src = img.src
+  })
 }
 
 function getRandomImage() {
