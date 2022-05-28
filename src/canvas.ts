@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-export const n = ref(1)
+export const n = ref(5)
 export const hideMask = ref(false)
 useStorage("FIND_GOLD_level", n);
 
@@ -29,7 +29,12 @@ export const golds: any[] = []
 export const goldArray = ref<any[]>([]);
 export const start = ref();
 export const win = ref(false)
-const range = computed(() => n.value > 5 ? w.value : w.value * 5 / n.value)
+export const rangeScope = ref(1)
+const range = computed(() => rangeScope.value * (n.value > 5 ? w.value : w.value * 5 / n.value))
+
+export const magnifying = ref<any[]>([])
+
+export const gift = ref<any[]>([])
 
 export function setup() {
   ctx.clearRect(0, 0, WIDTH, HEIGHT)
@@ -178,6 +183,7 @@ function draw() {
   const center = grid[Math.floor(rows.value * cols.value / 2) - Math.floor(rows.value / 2) - 1]
   findFar(grid[0], end)
   canDerive(grid[rows.value - 1], grid[0])
+  canDerive(grid[rows.value * (cols.value - 1)], grid[0])
 
   for (let i = 0; i < grid.length; i++) {
     if ((i & 1) === 1) {
@@ -251,13 +257,14 @@ function findFar(start: Cell, target: Cell, map = new Set) {
 }
 
 
-
 export function rightMove() {
   const right = grid[current.index(current.i + 1, current.j)]
   if (current.walls[3] || !right || right.walls[2])
     return false
   if (imgLeft.value < (rows.value - 1) * w.value) {
     imgLeft.value += w.value
+    console.log(maskX, maskY)
+
     mask.style.transform = `translate(${maskX += w.value}px, ${maskY}px)`
   }
   current = right
@@ -309,9 +316,15 @@ export function initMask() {
   mask.width = 2 * WIDTH;
   mask.height = 2 * WIDTH;
   drawCircle(WIDTH + w.value / 2, WIDTH + w.value / 2, range.value)
-  mask.setAttribute('style', `position:absolute;left:-${WIDTH}px;top:-${WIDTH}px;z-index:10;`)
-  return mask
+  mask.setAttribute('style', `position:absolute;left:-${WIDTH}px;top:-${WIDTH}px;z-index:10`)
 
+  return mask
+}
+
+export function updateMask() {
+  stepClear = 1
+  drawCircle(WIDTH + w.value / 2, WIDTH + w.value / 2, range.value)
+  mask.setAttribute('style', `position:absolute;left:-${WIDTH}px;top:-${WIDTH}px;z-index:10;transform:translate(${maskX}px, ${maskY}px`)
 }
 
 
@@ -331,6 +344,7 @@ function clearArc(x: number, y: number, radius: number) {
 
 function drawCircle(x: number, y: number, r: number) {
   maskCtx.clearRect(0, 0, 2 * WIDTH, 2 * WIDTH)
+  maskCtx.beginPath()
   maskCtx.fillStyle = "#000";
   maskCtx.fillRect(0, 0, 2 * WIDTH, 2 * WIDTH);
   clearArc(x, y, r);
@@ -375,9 +389,64 @@ function randomGold() {
       i--
     }
   }
+  if (n.value >= 5)
+    pushMagnifying(result)
+  else {
+    magnifying.value.length = 0
+  }
+  if (n.value > 3) {
+    pushGift(result)
+  } else {
+    gift.value.length = 0
+  }
   return result
 }
 
+function pushMagnifying(result: any[]) {
+  for (let i = 0; i < 2; i++) {
+    const center = golds.filter(item => item.i > rows.value / 4 && item.i < rows.value * 3 / 4 && item.j > cols.value / 4 && item.j < cols.value * 3 / 4)
+    const index = Math.floor(Math.random() * center.length)
+    const scope: Cell = center[index]
+    if (scope && !result.includes(scope))
+      magnifying.value.push({
+        x: scope.i * w.value,
+        y: scope.j * w.value,
+        i: scope.i,
+        j: scope.j,
+        show: true
+      })
+  }
+
+}
+
+function pushGift(result: any[]) {
+  const randomImage: string[] = []
+  for (let i = 0; i < 2; i++) {
+    const center = golds.filter(item => item.i > rows.value / 4 && item.i < rows.value * 3 / 4 || item.j > cols.value / 4 && item.j < cols.value * 3 / 4)
+    const index = Math.floor(Math.random() * center.length)
+    const scope: Cell = center[index]
+    let src = getRandomImage()
+    while (randomImage.includes(src)) {
+      src = getRandomImage()
+    }
+    if (scope && !result.includes(scope) && !magnifying.value.includes(scope))
+      gift.value.push({
+        x: scope.i * w.value,
+        y: scope.j * w.value,
+        i: scope.i,
+        j: scope.j,
+        show: true,
+        srcShow: false,
+        src
+      })
+    randomImage.push(src)
+  }
+  console.log(gift.value)
+}
+
+function getRandomImage() {
+  return `/img/${Math.floor(Math.random() * 19) + 1}.jpg`
+}
 
 
 
