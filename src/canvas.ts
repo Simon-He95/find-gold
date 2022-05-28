@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-export const n = ref(10)
+export const n = ref(1)
 export const hideMask = ref(false)
 useStorage("FIND_GOLD_level", n);
 
