@@ -1,6 +1,5 @@
 import { ref, computed } from 'vue'
-import { useResizeObserver } from '@vueuse/core'
-export const n = ref(2)
+export const n = ref(1)
 useStorage("FIND_GOLD_level", n);
 
 const WIDTH = window.outerWidth > 600 ? 600 : window.outerWidth
