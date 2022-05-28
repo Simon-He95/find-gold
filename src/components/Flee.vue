@@ -14,12 +14,17 @@ import {
   start,
   win,
   n,
+  hideMask,
 } from "../canvas";
 const FleeEl = ref(null);
 let canvas = setup();
 const mask = initMask();
 
 const animate = $ref(false);
+watch(hideMask, (newV) => {
+  if (newV) mask.setAttribute("class", "hide");
+  else mask.removeAttribute("class", "hide");
+});
 onMounted(() => {
   FleeEl.value.appendChild(canvas);
   FleeEl.value.appendChild(mask);
@@ -218,10 +223,8 @@ function restart() {
   </div>
 </template>
 
-<style scoped>
-.mask {
-  -webkit-mask-image: url("/file.png");
-  -webkit-mask-repeat: no-repeat; /* 表示不重复 */
-  border: 300px solid rgba(0, 0, 0, 0.7);
+<style>
+.hide {
+  display: none;
 }
 </style>

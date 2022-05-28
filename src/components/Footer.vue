@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { isDark, toggleDark } from "~/composables";
+import { isDark } from "~/composables";
+import { hideMask } from "../canvas";
 isDark.value = true;
 </script>
 
 <template>
-  <nav text-xl mt-6 inline-flex gap-2>
-    <button class="icon-btn !outline-none" @click="toggleDark()">
-      <div v-if="isDark" i-carbon-moon />
+  <nav text-xl mt-6 inline-flex gap-5>
+    <button class="icon-btn !outline-none" @click="hideMask = !hideMask">
+      <div v-if="hideMask" i-carbon-moon />
       <div v-else i-carbon-sun />
     </button>
 
