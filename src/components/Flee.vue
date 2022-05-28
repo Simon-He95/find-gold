@@ -23,6 +23,7 @@ import {
 const FleeEl = ref(null);
 let canvas = setup();
 const mask = initMask();
+const upgrade = ref(false);
 
 const animate = $ref(false);
 watch(hideMask, (newV) => {
@@ -140,8 +141,12 @@ const number = computed(() => {
     win.value = true;
     n.value++;
     alert(`你找到了所有的金币!用时间${countDown}秒, Level Up !!!`);
+    upgrade.value = true;
     setup();
     initMask();
+    setTimeout(() => {
+      upgrade.value = false;
+    }, 500);
   }
   return result;
 });
@@ -172,16 +177,7 @@ function pause() {
 </script>
 
 <template>
-  <div
-    flex="~ gap-5"
-    justify-center
-    items-end
-    m-b-5
-    overflow-hidden
-    max-w-150
-    ma
-    @click="widen"
-  >
+  <div flex="~ gap-5" justify-center items-end m-b-5 overflow-hidden max-w-150 ma>
     <div flex="~ gap-2" items-center="" justify="center" m-t-5="">
       <svg
         xmlns="http://www.w3.org/2000/svg"
@@ -219,6 +215,8 @@ function pause() {
         aria-hidden="true"
         role="img"
         w-5
+        :class="upgrade && 'animate-bounce-in-down'"
+        animate-duration-500
         preserveAspectRatio="xMidYMid meet"
         viewBox="0 0 32 32"
       >
