@@ -17,6 +17,12 @@ function finish() {
     content.value = contentList[index.value];
   }, 500);
 }
+
+function styleFn(i) {
+  return `color:rgb(${Math.random() * 255},${Math.random() * 255}, ${
+    Math.random() * 255
+  });animation-delay:${i * 0.1}s;`;
+}
 </script>
 
 <template>
@@ -46,6 +52,8 @@ function finish() {
       :speed="1"
       m-t-2
       style="box-shadow: 0 0 10px rgba(255, 255, 255, 0.5)"
+      :spilt-style="styleFn"
+      spiltTag="span"
       :finish="finish"
     ></vivid-typing>
   </main>
