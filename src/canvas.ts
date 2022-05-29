@@ -35,8 +35,11 @@ const range = computed(() => rangeScope.value * (n.value > 5 ? w.value : w.value
 export const magnifying = ref<any[]>([])
 
 export const gift = ref<any[]>([])
+const color = ref()
 
 export function setup() {
+  color.value = `rgba(${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, 0.9)`
+
   rangeScope.value = 1
   ctx.clearRect(0, 0, WIDTH, HEIGHT)
   imgLeft.value = 0
@@ -87,7 +90,7 @@ class Cell {
     ctx.beginPath()
     ctx.moveTo(x, y);
     ctx.lineTo(x2, y2);
-    ctx.strokeStyle = '#fff'
+    ctx.strokeStyle = color.value
     ctx.stroke()
   }
   index(i: number, j: number) {

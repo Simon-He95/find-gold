@@ -24,7 +24,6 @@ const FleeEl = ref(null);
 let canvas = setup();
 const mask = initMask();
 const upgrade = ref(false);
-const index = $ref(0);
 
 const animate = $ref(false);
 watch(hideMask, (newV) => {
@@ -58,14 +57,6 @@ function touchstart(e) {
   const { clientX, clientY } = e.changedTouches[0];
   startX = clientX;
   startY = clientY;
-  if (index.value === 0) {
-    walkSound();
-    play();
-    winSound();
-    fireSound();
-    eatGold();
-  }
-  index++;
 }
 document.body.addEventListener("touchmove", touchmove(), { passive: false });
 

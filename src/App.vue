@@ -21,7 +21,16 @@ function finish() {
 
 <template>
   <main font-sans p=" y-10" text="center " ma>
-    <vivid-typing content="Find Gold" text-3xl m-b-2></vivid-typing>
+    <vivid-typing
+      content="Find Gold"
+      text-3xl
+      m-b-2
+      bg-clip-text
+      style="
+        background-image: linear-gradient(120deg, #30cfd0 0%, #ebbba7 50%, #a3bded 80%);
+        color: transparent;
+      "
+    ></vivid-typing>
     <div border-2 w-50 ma border-rd-1 border-dashed m-y-5>
       <vivid-typing
         :scrollY="true"
