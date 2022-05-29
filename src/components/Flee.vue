@@ -174,11 +174,15 @@ function widen() {
 }
 
 const audio = document.createElement("audio");
+audio.src = "/bgm/bgm.mp3";
 const audioWalk = document.createElement("audio");
+audioWalk.src = "/bgm/walk.mp3";
+
 const audioGold = document.createElement("audio");
+audioGold.src = "/bgm/gold.mp3";
+
 function play() {
   audio.load();
-  audio.src = "/bgm/bgm.mp3";
   audio.play();
 }
 function pause() {
@@ -187,12 +191,10 @@ function pause() {
 
 function walkSound() {
   audioWalk.load();
-  audioWalk.src = "/bgm/walk.mp3";
   audioWalk.play();
 }
 function eatGold() {
   audioGold.load();
-  audioGold.src = "/bgm/gold.mp3";
   audioGold.play();
 }
 </script>

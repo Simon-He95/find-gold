@@ -263,8 +263,6 @@ export function rightMove() {
     return false
   if (imgLeft.value < (rows.value - 1) * w.value) {
     imgLeft.value += w.value
-    console.log(maskX, maskY)
-
     mask.style.transform = `translate(${maskX += w.value}px, ${maskY}px)`
   }
   current = right
