@@ -36,16 +36,16 @@ onMounted(() => {
 });
 window.addEventListener("keydown", keydown);
 function keydown(e) {
-  if (e.keyCode === 40 && downMove()) {
+  if ((e.keyCode === 40 || e.keyCode === 74) && downMove()) {
     // down
     changeShow();
-  } else if (e.keyCode === 37 && leftMove()) {
+  } else if ((e.keyCode === 37 || e.keyCode == 72) && leftMove()) {
     // left
     changeShow();
-  } else if (e.keyCode === 38 && topMove()) {
+  } else if ((e.keyCode === 38 || e.keyCode == 75) && topMove()) {
     // up
     changeShow();
-  } else if (e.keyCode === 39 && rightMove()) {
+  } else if ((e.keyCode === 39 || e.keyCode == 76) && rightMove()) {
     // right
     changeShow();
   }
