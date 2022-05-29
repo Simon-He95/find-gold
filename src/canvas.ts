@@ -37,6 +37,7 @@ export const magnifying = ref<any[]>([])
 export const gift = ref<any[]>([])
 
 export function setup() {
+  rangeScope.value = 1
   ctx.clearRect(0, 0, WIDTH, HEIGHT)
   imgLeft.value = 0
   imgTop.value = 0
