@@ -5,7 +5,7 @@ isDark.value = true;
 </script>
 
 <template>
-  <nav text-xl mt-6 inline-flex gap-5>
+  <nav text-2xl mt-6 inline-flex gap-10>
     <button class="icon-btn !outline-none" @click="hideMask = !hideMask">
       <div v-if="hideMask" i-carbon-moon />
       <div v-else i-carbon-sun />

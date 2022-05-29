@@ -57,6 +57,7 @@ function touchstart(e) {
   const { clientX, clientY } = e.changedTouches[0];
   startX = clientX;
   startY = clientY;
+  walkSound();
 }
 document.body.addEventListener("touchmove", touchmove(), { passive: false });
 
@@ -176,8 +177,10 @@ function widen() {
 
 const audio = document.createElement("audio");
 audio.src = "/bgm/bgm.mp3";
+
 const audioWalk = document.createElement("audio");
 audioWalk.src = "/bgm/walk.mp3";
+audioWalk.muted = false;
 
 const audioGold = document.createElement("audio");
 audioGold.src = "/bgm/gold.mp3";
@@ -215,18 +218,18 @@ function winSound() {
 </script>
 
 <template>
-  <div flex="~ gap-5" justify-center items-end m-b-5 overflow-hidden max-w-150 ma>
-    <div flex="~ gap-2" items-center justify-center>
-      <img w-5 src="/img/reset.svg" @click="restart" alt="reset" />
-      <img w-5 src="/img/clock.svg" alt="clock" />
+  <div flex="~ gap-5" justify-center items-end m-b-5 max-w-150 ma>
+    <div flex="~ gap-4" items-center justify-center>
+      <img w-7 src="/img/reset.svg" @click="restart" alt="reset" />
+      <img w-7 src="/img/clock.svg" alt="clock" />
       {{ countDown }}
-      <img src="/img/gold.svg" w-5 :class="animate && 'animate-heart-beat'" alt="gold" />
+      <img src="/img/gold.svg" w-7 :class="animate && 'animate-heart-beat'" alt="gold" />
       {{ number }}
       <svg
         xmlns="http://www.w3.org/2000/svg"
         aria-hidden="true"
         role="img"
-        w-5
+        w-7
         :class="upgrade && 'animate-bounce-in-down'"
         animate-duration-500
         preserveAspectRatio="xMidYMid meet"
@@ -241,7 +244,7 @@ function winSound() {
     </div>
   </div>
 
-  <div ref="FleeEl" relative overflow="hidden" max-w-150 ma>
+  <div ref="FleeEl" relative overflow-hidden max-w-150 ma>
     <img
       absolute
       src="/img/fire.svg"
