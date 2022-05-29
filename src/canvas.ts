@@ -412,7 +412,7 @@ function pushMagnifying(result: any[]) {
         y: scope.j * w.value,
         i: scope.i,
         j: scope.j,
-        show: true
+        show: true,
       })
   }
 
@@ -436,7 +436,8 @@ function pushGift(result: any[]) {
         j: scope.j,
         show: true,
         srcShow: false,
-        src
+        src,
+        url: getRandomGift()
       })
     randomImage.push(src)
   }
@@ -449,6 +450,10 @@ function pushGift(result: any[]) {
 
 function getRandomImage() {
   return `/img/${Math.floor(Math.random() * 19) + 1}.jpg`
+}
+
+function getRandomGift() {
+  return `/img/gift${Math.floor(Math.random() * 2) + 1}.svg`
 }
 
 

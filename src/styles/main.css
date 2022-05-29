@@ -5,8 +5,6 @@ body,
   margin: 0;
   padding: 0;
   overflow:hidden;
-}
-
-html.dark {
-  background: #121212;
+  background-image: url('/img/bg.png');
+  background-size:"cover";
 }
