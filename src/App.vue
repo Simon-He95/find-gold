@@ -23,24 +23,33 @@ function styleFn(i) {
     Math.random() * 255
   });animation-delay:${i * 0.1}s;`;
 }
+
+const Title = ref("Find Gold");
+function finishTitle() {
+  if (Title.value.length > 4) {
+    Title.value = "Find";
+  } else {
+    Title.value = "Find Gold";
+  }
+}
 </script>
 
 <template>
   <main font-sans p=" y-10" text="center " ma>
     <vivid-typing
-      content="Find Gold"
+      :content="Title"
       text-3xl
       m-b-2
-      bg-clip-text
-      style="
-        background-image: linear-gradient(120deg, #30cfd0 0%, #ebbba7 50%, #a3bded 80%);
-        color: transparent;
-      "
+      :interval="200"
+      :stable="true"
+      h-10
+      :finish="finishTitle"
     ></vivid-typing>
-    <div border-2 w-50 ma border-rd-1 border-dashed m-y-5>
+    <div border-2 w-50 ma border-rd-1 border-dashed m-y-5 overflow-hidden>
       <vivid-typing
         :scrollY="true"
         :content="'当前关卡 level:' + n"
+        :speed="10"
         text-sm
         h-5
       ></vivid-typing>
