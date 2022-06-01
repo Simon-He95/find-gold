@@ -3,7 +3,11 @@
 [live demo](https://find-gold.hejian.club/)
 
 ## 游戏操作
-支持按键:上下左右、wasd、ghjk和手机的touchmove
+
+<img src="./public/img/operate1.png" alt="wasd" height="100px">
+<img src="./public/img/operate2.png" alt="上下左右"  height="100px">
+<img src="./public/img/operate3.png" alt="hjkl"  height="100px">
+<img src="./public/img/operate4.png" alt="鼠标或手指"  height="100px">
 
 ## 游戏道具
 - 金币（收集到当前管卡的金币才可进入下一关）
