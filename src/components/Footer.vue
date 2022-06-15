@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { isDark } from "~/composables";
-import { hideMask } from "../canvas";
-isDark.value = true;
+import { hideMask } from '../canvas'
+import { isDark } from '~/composables'
+isDark.value = true
 </script>
 
 <template>
