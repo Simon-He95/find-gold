@@ -15,3 +15,7 @@
 - 礼物（随机的美女图片）
 
 ## 欢迎大家来提PR
+
+## :coffee:
+
+[请我喝一杯咖啡](https://github.com/Simon-He95/sponsor)
