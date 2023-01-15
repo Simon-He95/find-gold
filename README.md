@@ -1,6 +1,6 @@
 ## Find Gold
 
-[live demo](https://find-gold.hejian.club/)
+[live demo](https://find-gold.netlify.app/)
 
 ## 游戏操作
 
