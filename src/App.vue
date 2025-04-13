@@ -140,7 +140,7 @@ function toggleHelp() {
               <span>木柴 - 扩大你的视野范围</span>
             </div>
             <div class="flex items-center my1">
-              <img src="/img/gift1-pixel.svg" class="w5 h5 mr2" alt="礼物">
+              <img src="/img/gift1.svg" class="w5 h5 mr2" alt="礼物">
               <span>礼物 - 打开会有惊喜！</span>
             </div>
           </div>
