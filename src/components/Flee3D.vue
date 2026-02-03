@@ -92,6 +92,10 @@ function isInputLocked() {
   return showWin.value
 }
 
+function resetInput() {
+  keys.clear()
+}
+
 function bump() {
   if (bumping.value)
     return
@@ -211,6 +215,7 @@ function advanceLevel() {
   if (win.value)
     return
   win.value = true
+  resetInput()
 
   const finishedLevel = n.value
   const key = String(finishedLevel)
@@ -513,7 +518,7 @@ function animate() {
     return
 
   const dt = Math.min(0.04, clock.getDelta())
-  if (!paused.value && locked.value) {
+  if (!paused.value && locked.value && !isInputLocked()) {
     const forward = new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(0, yaw, 0, 'YXZ'))
     const right = new THREE.Vector3(1, 0, 0).applyEuler(new THREE.Euler(0, yaw, 0, 'YXZ'))
 

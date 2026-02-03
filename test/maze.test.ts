@@ -43,6 +43,12 @@ describe('maze snapshot invariants', () => {
         }
       }
 
+      // snapshot cell order should be row-major: i + j * cols
+      for (let idx = 0; idx < snap.cells.length; idx++) {
+        const cell = snap.cells[idx]
+        expect(cell.i + cell.j * snap.cols).toBe(idx)
+      }
+
       // reachable exit from start via BFS
       const startKey = '0,0'
       const targetKey = `${exit.i},${exit.j}`
@@ -114,6 +120,40 @@ describe('grid collision', () => {
       const movedUp = moveWithGridCollisions(snap, cfg, start, 0, -1)
       if (cell.walls[0])
         expect(movedUp.z).toBeGreaterThan(0)
+    }
+    finally {
+      rnd.mockRestore()
+    }
+  })
+
+  it('clamps against an internal right wall', () => {
+    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.42)
+    try {
+      setup()
+      const snap = getMazeSnapshot()
+      const cfg = { cellSize: 1, radius: 0.2, height: 1.6, epsilon: 0.001 }
+
+      let picked: { i: number, j: number } | null = null
+      for (let j = 0; j < snap.rows; j++) {
+        for (let i = 0; i < snap.cols - 1; i++) {
+          const cell = getCell(snap, i, j)!
+          if (cell.walls[3]) {
+            picked = { i, j }
+            break
+          }
+        }
+        if (picked)
+          break
+      }
+
+      expect(picked).not.toBeNull()
+      const { i, j } = picked!
+      const start = { x: i + 0.5, y: 0.55, z: j + 0.5 }
+      const moved = moveWithGridCollisions(snap, cfg, start, 0.8, 0)
+
+      const maxLocal = cfg.cellSize - cfg.radius - cfg.epsilon
+      const maxX = i * cfg.cellSize + maxLocal
+      expect(moved.x).toBeLessThanOrEqual(maxX + 1e-6)
     }
     finally {
       rnd.mockRestore()
