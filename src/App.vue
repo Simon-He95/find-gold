@@ -57,6 +57,12 @@ const showHelp = ref(false)
 function toggleHelp() {
   showHelp.value = !showHelp.value
 }
+
+const viewMode = useStorage<'2d' | '3d'>('FIND_GOLD_view_mode', '2d')
+const is3D = computed(() => viewMode.value === '3d')
+function toggleViewMode() {
+  viewMode.value = is3D.value ? '2d' : '3d'
+}
 </script>
 
 <template>
@@ -77,6 +83,10 @@ function toggleHelp() {
         </button>
 
         <div class="header-right">
+          <button class="mode-button" type="button" :title="is3D ? '切换到2D' : '切换到3D'" @click="toggleViewMode">
+            <div :class="is3D ? 'i-carbon-grid' : 'i-carbon-cube'" class="mr1" />
+            <span>{{ is3D ? '2D' : '3D' }}</span>
+          </button>
           <button class="icon-button" :title="soundEnabled ? '关闭声音' : '开启声音'" @click="toggleSound">
             <div :class="soundEnabled ? 'i-carbon-volume-up' : 'i-carbon-volume-mute'" />
           </button>
@@ -95,12 +105,13 @@ function toggleHelp() {
           <span>前往出口</span>
         </div>
         <div class="objective-hint">
-          WASD / 方向键
+          {{ is3D ? 'WASD + 鼠标 / Q E 转角' : 'WASD / 方向键' }}
         </div>
       </div>
 
       <div class="game-content">
-        <Flee :sound-enabled="soundEnabled" class="game-board" />
+        <Flee v-if="!is3D" :sound-enabled="soundEnabled" class="game-board" />
+        <Flee3D v-else :sound-enabled="soundEnabled" class="game-board" />
 
         <div class="game-info">
           <vivid-typing
@@ -129,6 +140,9 @@ function toggleHelp() {
             </p>
             <p class="mb2">
               <b>控制方式：</b>方向键 / WASD（移动受墙体阻挡）
+            </p>
+            <p class="mb2">
+              <b>3D模式：</b>点击画面进入第一人称（锁定鼠标），WASD移动，Shift冲刺，Q/E顺滑转角，Esc退出
             </p>
             <p class="mb2">
               <b>道具说明：</b>
@@ -198,6 +212,33 @@ function toggleHelp() {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.mode-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(8px);
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-weight: 800;
+  font-size: 0.9rem;
+}
+
+.mode-button:hover {
+  background: rgba(255, 255, 255, 0.12);
+  transform: translateY(-1px);
+}
+
+.mode-button > div {
+  width: 18px;
+  height: 18px;
+  opacity: 0.9;
 }
 
 .app-title {

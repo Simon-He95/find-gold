@@ -25,6 +25,8 @@ const cols = computed(() => Math.floor(WIDTH / w.value))
 const rows = computed(() => Math.floor(HEIGHT / w.value))
 export const imgLeft = ref(0)
 export const imgTop = ref(0)
+export const mazeCols = cols
+export const mazeRows = rows
 
 // mask
 export const mask: HTMLCanvasElement = document.createElement('canvas')
@@ -42,6 +44,21 @@ const range = computed(() => rangeScope.value * (n.value > 5 ? w.value : w.value
 
 export const exit = ref<{ x: number, y: number, i: number, j: number } | null>(null)
 export const exitUnlocked = ref(false)
+
+export interface MazeCellSnapshot {
+  i: number
+  j: number
+  walls: [boolean, boolean, boolean, boolean]
+}
+
+export interface MazeSnapshot {
+  cols: number
+  rows: number
+  cellSizePx: number
+  exit: { i: number, j: number } | null
+  gold: Array<{ i: number, j: number, show: boolean }>
+  cells: MazeCellSnapshot[]
+}
 
 export const magnifying = ref<any[]>([])
 
@@ -68,7 +85,8 @@ const theme = ref<MazeTheme>({
 function safeGet2dContext(el: HTMLCanvasElement): CanvasRenderingContext2D {
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
   const isJSDOM = /jsdom/i.test(ua)
-  if (isJSDOM)
+  const isNoWebGL = typeof (globalThis as any).WebGLRenderingContext === 'undefined'
+  if (isJSDOM || isNoWebGL)
     return makeStubContext(el)
 
   try {
@@ -88,11 +106,13 @@ function makeStubContext(el: HTMLCanvasElement): CanvasRenderingContext2D {
     canvas: el,
     clearRect: noop,
     fillRect: noop,
+    strokeRect: noop,
     beginPath: noop,
     arc: noop,
     fill: noop,
     stroke: noop,
     createRadialGradient: () => gradient,
+    createLinearGradient: () => gradient,
     setTransform: noop,
     save: noop,
     restore: noop,
@@ -413,6 +433,21 @@ function draw() {
   }
 }
 
+export function getMazeSnapshot(): MazeSnapshot {
+  return {
+    cols: cols.value,
+    rows: rows.value,
+    cellSizePx: w.value,
+    exit: exit.value ? { i: exit.value.i, j: exit.value.j } : null,
+    gold: goldArray.value.map(g => ({ i: g.i, j: g.j, show: !!g.show })),
+    cells: grid.map((c: Cell) => ({
+      i: c.i,
+      j: c.j,
+      walls: [!!c.walls[0], !!c.walls[1], !!c.walls[2], !!c.walls[3]],
+    })) as MazeCellSnapshot[],
+  }
+}
+
 function getOpenNeighbors(cell: Cell) {
   const neighbors: Cell[] = []
   if (!cell.walls[0]) {
@@ -567,10 +602,10 @@ function clearArc(x: number, y: number, radius: number) {
 }
 
 function drawCircle(x: number, y: number, r: number) {
-  maskCtx.clearRect(0, 0, 2 * WIDTH, 2 * WIDTH)
+  maskCtx.clearRect(0, 0, mask.width, mask.height)
   maskCtx.beginPath()
   maskCtx.fillStyle = '#000'
-  maskCtx.fillRect(0, 0, 2 * WIDTH, 2 * WIDTH)
+  maskCtx.fillRect(0, 0, mask.width, mask.height)
 
   // Create a gradient for the edge of the visibility circle
   const gradient = maskCtx.createRadialGradient(x, y, r * 0.85, x, y, r)

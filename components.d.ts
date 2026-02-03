@@ -5,6 +5,7 @@
 declare module 'vue' {
   export interface GlobalComponents {
     Flee: typeof import('./src/components/Flee.vue')['default']
+    Flee3D: typeof import('./src/components/Flee3D.vue')['default']
     Footer: typeof import('./src/components/Footer.vue')['default']
   }
 }
