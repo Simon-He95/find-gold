@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import {
   downMove,
+  exit,
+  exitUnlocked,
   gift,
   goldArray,
   hideMask,
@@ -28,12 +30,21 @@ const props = defineProps({
   },
 })
 
-const FleeEl = ref(null)
+const FleeEl = ref<HTMLElement | null>(null)
 const canvas = setup()
 const mask = initMask()
 const upgrade = ref(false)
 // Monitor remaining gold count
 const animate = ref(false)
+const steps = ref(0)
+const bumping = ref(false)
+
+interface LevelRecord {
+  time: number
+  steps: number
+}
+const records = useStorage<Record<string, LevelRecord>>('FIND_GOLD_records', {})
+const bestForCurrentLevel = computed(() => records.value[String(n.value)])
 
 // Progress calculation for collecting gold
 const progress = computed(() => {
@@ -44,76 +55,111 @@ const progress = computed(() => {
   return Math.round((collected / total) * 100)
 })
 
+const remainingGold = computed(() => goldArray.value.filter(item => item.show).length)
+const totalGold = computed(() => goldArray.value.length)
+const isOnExit = computed(() => {
+  if (!exit.value)
+    return false
+  return exit.value.x === imgLeft.value && exit.value.y === imgTop.value
+})
+const exitAngle = computed(() => {
+  if (!exit.value)
+    return 0
+  const dx = exit.value.x - imgLeft.value
+  const dy = exit.value.y - imgTop.value
+  return Math.atan2(dy, dx) * 180 / Math.PI + 90
+})
+const exitDistance = computed(() => {
+  if (!exit.value)
+    return 0
+  const ci = Math.round(imgLeft.value / w.value)
+  const cj = Math.round(imgTop.value / w.value)
+  return Math.abs(exit.value.i - ci) + Math.abs(exit.value.j - cj)
+})
+
 // Keep track of last move time for mobile controls to prevent too fast movements
 let lastMoveTime = 0
 const moveDelay = 200 // ms between moves
 
 // Handle mask visibility
 watch(hideMask, (newV) => {
-  if (newV)
-    mask.setAttribute('class', 'hide')
-  else mask.removeAttribute('class', 'hide')
+  mask.style.display = newV ? 'none' : ''
 })
 
 // Initialize game board
 onMounted(() => {
+  if (!FleeEl.value)
+    return
   FleeEl.value.appendChild(canvas)
   FleeEl.value.appendChild(mask)
 })
 
 // Keyboard controls
 window.addEventListener('keydown', keydown)
-function keydown(e) {
-  if ((e.keyCode === 40 || e.keyCode === 74 || e.keyCode === 83) && downMove()) {
-    // down
-    changeShow()
+function keydown(e: KeyboardEvent) {
+  if (isInputLocked())
+    return
+
+  if (e.keyCode === 40 || e.keyCode === 74 || e.keyCode === 83) {
+    if (downMove())
+      changeShow()
+    else
+      bump()
   }
-  else if ((e.keyCode === 37 || e.keyCode === 72 || e.keyCode === 65) && leftMove()) {
-    // left
-    changeShow()
+  else if (e.keyCode === 37 || e.keyCode === 72 || e.keyCode === 65) {
+    if (leftMove())
+      changeShow()
+    else
+      bump()
   }
-  else if ((e.keyCode === 38 || e.keyCode === 75 || e.keyCode === 87) && topMove()) {
-    // up
-    changeShow()
+  else if (e.keyCode === 38 || e.keyCode === 75 || e.keyCode === 87) {
+    if (topMove())
+      changeShow()
+    else
+      bump()
   }
-  else if ((e.keyCode === 39 || e.keyCode === 76 || e.keyCode === 68) && rightMove()) {
-    // right
-    changeShow()
+  else if (e.keyCode === 39 || e.keyCode === 76 || e.keyCode === 68) {
+    if (rightMove())
+      changeShow()
+    else
+      bump()
   }
 }
 
 // Touch controls for mobile
-let startX = null
-let startY = null
+let startX: number | null = null
+let startY: number | null = null
 window.addEventListener('touchstart', touchstart)
-function touchstart(e) {
+function touchstart(e: TouchEvent) {
   const { clientX, clientY } = e.changedTouches[0]
   startX = clientX
   startY = clientY
 }
-document.body.addEventListener('touchmove', touchmove(), { passive: false })
+const onTouchMove = throttle((e) => {
+  if (isInputLocked())
+    return
+  e.preventDefault()
+  if (startX === null || startY === null)
+    return
+  const { clientX, clientY } = e.changedTouches[0]
+  if (clientX > startX && rightMove())
+    changeShow()
 
-function touchmove() {
-  const fn = throttle((e) => {
-    e.preventDefault()
-    const { clientX, clientY } = e.changedTouches[0]
-    if (clientX > startX && rightMove())
-      changeShow()
+  if (clientX < startX && leftMove())
+    changeShow()
 
-    if (clientX < startX && leftMove())
-      changeShow()
+  if (clientY > startY && downMove())
+    changeShow()
 
-    if (clientY > startY && downMove())
-      changeShow()
-
-    if (clientY < startY && topMove())
-      changeShow()
-  })
-  return fn
-}
+  if (clientY < startY && topMove())
+    changeShow()
+})
+document.body.addEventListener('touchmove', onTouchMove, { passive: false })
 
 // Custom directional controls - added for better mobile experience
-function moveDirection(direction) {
+function moveDirection(direction: 'up' | 'down' | 'left' | 'right') {
+  if (isInputLocked())
+    return
   const now = Date.now()
   if (now - lastMoveTime < moveDelay)
     return
@@ -138,31 +184,47 @@ function moveDirection(direction) {
 
   if (moved)
     changeShow()
+  else
+    bump()
 }
 
 // Clean up event listeners
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', keydown)
-  document.body.removeEventListener('touchmove', touchmove())
+  document.body.removeEventListener('touchmove', onTouchMove)
   window.removeEventListener('touchstart', touchstart)
 })
 
 // Prevent too rapid movements
-function throttle(fn) {
+function throttle<T extends (...args: any[]) => void>(fn: T) {
   let flag = false
-  return function (...rest) {
+  return (...rest: Parameters<T>) => {
     if (flag)
       return
     flag = true
-    fn.apply(this, rest)
+    fn(...rest)
     setTimeout(() => {
       flag = false
     }, 200)
   }
 }
 
+function bump() {
+  if (bumping.value)
+    return
+  bumping.value = true
+  try {
+    navigator.vibrate?.(20)
+  }
+  catch {}
+  setTimeout(() => {
+    bumping.value = false
+  }, 140)
+}
+
 // Handle item collection and interactions
 function changeShow() {
+  steps.value++
   let flag = true
   goldArray.value = goldArray.value.map((item) => {
     if (item.x === imgLeft.value && item.y === imgTop.value && item.show) {
@@ -176,6 +238,12 @@ function changeShow() {
     }
     return item
   })
+
+  if (totalGold.value && remainingGold.value === 0 && !exitUnlocked.value) {
+    exitUnlocked.value = true
+    showExitUnlockedMessage()
+  }
+
   magnifying.value = magnifying.value.map((item) => {
     if (item.x === imgLeft.value && item.y === imgTop.value && item.show) {
       flag = false
@@ -198,6 +266,10 @@ function changeShow() {
     }
     return item
   })
+
+  if (exitUnlocked.value && isOnExit.value)
+    advanceLevel()
+
   if (flag)
     walkSound()
 }
@@ -206,36 +278,63 @@ function changeShow() {
 const now = useNow()
 const countDown = computed(() => Math.round((+now.value - start.value) / 1000))
 
-const number = computed(() => {
-  if (!goldArray.value.length)
+watch(remainingGold, (val) => {
+  if (!totalGold.value)
     return
-  const result = goldArray.value.filter(item => item.show).length
-  if (result === 0 && !win.value) {
-    win.value = true
-    n.value++
-    winSound()
-    showLevelUpMessage()
-    // eslint-disable-next-line vue/no-side-effects-in-computed-properties
-    upgrade.value = true
-    setup()
-    initMask()
-    // eslint-disable-next-line vue/no-async-in-computed-properties
-    setTimeout(() => {
-      upgrade.value = false
-    }, 500)
+  if (val === 0 && !exitUnlocked.value) {
+    exitUnlocked.value = true
+    showExitUnlockedMessage()
   }
-  return result
 })
 
 // Level up message with custom formatting
 const levelUpMessage = ref('')
 const showingLevelUp = ref(false)
-function showLevelUpMessage() {
-  levelUpMessage.value = `恭喜! 你完成了第${n.value - 1}关!\n用时: ${countDown.value}秒\n即将进入第${n.value}关...`
+function showLevelUpMessage(level: number) {
+  const best = records.value[String(level)]
+  const bestLine = best ? `\n最佳: ${best.time}秒 / ${best.steps}步` : ''
+  levelUpMessage.value = `恭喜通关第${level}关!\n用时: ${countDown.value}秒\n步数: ${steps.value}${bestLine}\n即将进入第${level + 1}关...`
   showingLevelUp.value = true
   setTimeout(() => {
     showingLevelUp.value = false
   }, 3000)
+}
+
+const exitUnlockedMessage = ref('')
+const showingExitUnlocked = ref(false)
+function showExitUnlockedMessage() {
+  exitUnlockedMessage.value = '出口已开启！前往绿色出口完成通关'
+  showingExitUnlocked.value = true
+  setTimeout(() => {
+    showingExitUnlocked.value = false
+  }, 2000)
+}
+
+function advanceLevel() {
+  if (win.value)
+    return
+  win.value = true
+
+  const finishedLevel = n.value
+  const key = String(finishedLevel)
+  const current = { time: countDown.value, steps: steps.value }
+  const prev = records.value[key]
+  if (!prev || current.time < prev.time || (current.time === prev.time && current.steps < prev.steps))
+    records.value[key] = current
+
+  winSound()
+  showLevelUpMessage(finishedLevel)
+
+  n.value++
+  steps.value = 0
+  upgrade.value = true
+  setup()
+  initMask()
+
+  setTimeout(() => {
+    upgrade.value = false
+    win.value = false
+  }, 500)
 }
 
 // Custom restart confirmation dialog
@@ -249,9 +348,14 @@ function restart() {
 
 function confirmRestart() {
   n.value = 1
+  steps.value = 0
   setup()
   initMask()
   showRestartConfirm.value = false
+}
+
+function isInputLocked() {
+  return showingLevelUp.value || showRestartConfirm.value
 }
 
 function cancelRestart() {
@@ -340,13 +444,28 @@ function winSound() {
       <div class="stat-item" title="重新开始游戏" @click="restart">
         <img w-6 src="/img/reset.svg" alt="reset" class="icon-button">
       </div>
-      <div class="stat-item">
+      <div
+        class="stat-item"
+        :title="bestForCurrentLevel ? `本关最佳：${bestForCurrentLevel.time}秒 / ${bestForCurrentLevel.steps}步` : '计时'"
+      >
         <img w-6 src="/img/clock.svg" alt="clock">
         <span class="stat-value">{{ countDown }}秒</span>
       </div>
       <div class="stat-item">
         <img src="/img/gold.svg" w-6 class="gold-item" :class="[animate && 'win-animation']" alt="gold">
-        <span class="stat-value">{{ number }}</span>
+        <span class="stat-value">{{ remainingGold }}</span>
+        <span class="stat-sub">/ {{ totalGold }}</span>
+      </div>
+      <div class="stat-item" title="步数">
+        <div i-carbon-run class="w-5 h-5 opacity-80" />
+        <span class="stat-value">{{ steps }}</span>
+      </div>
+      <div class="stat-item" :title="exitUnlocked ? '出口已开启' : '收集所有金币以开启出口'">
+        <div :class="exitUnlocked ? 'i-carbon-unlocked' : 'i-carbon-locked'" class="w-5 h-5 opacity-80" />
+        <span class="stat-mini">{{ exitUnlocked ? '出口' : '出口' }}</span>
+      </div>
+      <div v-if="exitUnlocked && exit" class="stat-item compass" :title="`出口方向（约${exitDistance}步）`">
+        <div i-carbon-arrow-up class="compass-arrow w-5 h-5" :style="{ transform: `rotate(${exitAngle}deg)` }" />
       </div>
     </div>
     <!-- Progress bar for level completion -->
@@ -354,29 +473,40 @@ function winSound() {
       <div class="progress-bar" :style="{ width: `${progress}%` }" />
     </div>
     <!-- Game board -->
-    <div ref="FleeEl" relative overflow-hidden rounded-lg class="game-board-container">
+    <div ref="FleeEl" relative overflow-hidden rounded-lg class="game-board-container" :class="{ bump: bumping }">
       <!-- Player character -->
       <img
         absolute src="/img/fire.svg" :style="{ width: `${w}px`, left: `${imgLeft}px`, top: `${imgTop}px` }"
         class="player" alt="fire"
       >
       <!-- Gold items -->
-      <template v-for="(item, index) in goldArray" :key="index">
+      <template v-for="item in goldArray" :key="`${item.i}-${item.j}`">
         <img
           v-if="item.show" src="/img/gold.svg"
           :style="{ width: `${w * 0.75}px`, left: `${item.x + 3}px`, top: `${item.y + 3}px` }" absolute class="gold-item"
           alt="gold"
         >
       </template>
+      <!-- Exit (unlock after collecting all gold) -->
+      <img
+        v-if="exit"
+        src="/img/exit.svg"
+        :style="{ width: `${w}px`, left: `${exit.x}px`, top: `${exit.y}px` }"
+        absolute
+        class="exit-item"
+        :class="[exitUnlocked ? 'exit-open' : 'exit-locked', isOnExit && exitUnlocked && 'exit-reached']"
+        alt="exit"
+        :title="exitUnlocked ? '出口已开启' : '收集所有金币以开启出口'"
+      >
       <!-- Wood items -->
-      <template v-for="(item, index) in magnifying" :key="index">
+      <template v-for="item in magnifying" :key="`${item.i}-${item.j}`">
         <img
           v-if="item.show" :style="{ width: `${w}px`, left: `${item.x}px`, top: `${item.y}px` }"
           absolute src="/img/wood.svg" class="wood-item" alt="wood"
         >
       </template>
       <!-- Gift items -->
-      <template v-for="(item, index) in gift" :key="index">
+      <template v-for="item in gift" :key="`${item.i}-${item.j}`">
         <img
           v-if="item.show" :src="item.url" :style="{ width: `${w}px`, left: `${item.x}px`, top: `${item.y}px` }"
           absolute class="gift-item" alt="gift"
@@ -414,6 +544,14 @@ function winSound() {
         </p>
       </div>
     </div>
+    <!-- Exit unlocked toast -->
+    <div v-if="showingExitUnlocked" class="popup toast">
+      <div class="popup-content toast-content">
+        <p class="text-sm whitespace-pre-line">
+          {{ exitUnlockedMessage }}
+        </p>
+      </div>
+    </div>
     <!-- Restart confirmation dialog -->
     <div v-if="showRestartConfirm" class="popup">
       <div class="popup-content">
@@ -433,11 +571,7 @@ function winSound() {
   </div>
 </template>
 
-<style>
-  .hide {
-    display: none;
-  }
-
+<style scoped>
   .flee-container {
     display: flex;
     flex-direction: column;
@@ -452,6 +586,80 @@ function winSound() {
     background: rgba(0, 0, 0, 0.2);
     border-radius: 8px;
     margin-bottom: 5px;
+  }
+
+  .stat-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(6px);
+  }
+
+  .stat-value {
+    font-weight: 700;
+    font-size: 1.05rem;
+    color: #FFD700;
+    text-shadow: 0 0 8px rgba(255, 215, 0, 0.25);
+  }
+
+  .stat-sub {
+    font-size: 0.8rem;
+    opacity: 0.7;
+  }
+
+  .stat-mini {
+    font-size: 0.85rem;
+    font-weight: 600;
+    opacity: 0.85;
+  }
+
+  .bump {
+    animation: bump 140ms ease-in-out;
+  }
+
+  @keyframes bump {
+    0% { transform: translateX(0); }
+    25% { transform: translateX(-4px); }
+    55% { transform: translateX(3px); }
+    100% { transform: translateX(0); }
+  }
+
+  .compass {
+    padding: 6px 8px;
+  }
+
+  .compass-arrow {
+    transition: transform 0.12s linear;
+    filter: drop-shadow(0 0 10px rgba(34, 197, 94, 0.35));
+  }
+
+  .exit-item {
+    filter: drop-shadow(0 0 8px rgba(34, 197, 94, 0.35));
+    transition: transform 0.15s ease, filter 0.2s ease, opacity 0.2s ease;
+    opacity: 0.9;
+  }
+
+  .exit-locked {
+    filter: grayscale(1) brightness(0.7);
+    opacity: 0.55;
+  }
+
+  .exit-open {
+    animation: exitPulse 1.6s ease-in-out infinite;
+  }
+
+  .exit-reached {
+    transform: scale(1.08);
+    filter: drop-shadow(0 0 14px rgba(34, 197, 94, 0.9));
+  }
+
+  @keyframes exitPulse {
+    0%, 100% { transform: scale(1); filter: drop-shadow(0 0 10px rgba(34, 197, 94, 0.45)); }
+    50% { transform: scale(1.04); filter: drop-shadow(0 0 16px rgba(34, 197, 94, 0.75)); }
   }
 
   .game-board-container {
@@ -510,6 +718,23 @@ function winSound() {
     justify-content: center;
     z-index: 100;
     backdrop-filter: blur(5px);
+  }
+
+  .toast {
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 14px;
+    background: rgba(0, 0, 0, 0.25);
+    backdrop-filter: none;
+  }
+
+  .toast-content {
+    max-width: 520px;
+    padding: 10px 14px;
+    border-radius: 999px;
+    background: rgba(20, 20, 20, 0.85);
+    border: 1px solid rgba(34, 197, 94, 0.35);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
   }
 
   .popup-content {

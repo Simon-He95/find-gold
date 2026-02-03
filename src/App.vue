@@ -5,7 +5,7 @@ import { n } from './canvas'
 const content = ref('欢迎来到寻找金币游戏')
 const contentList = [
   '欢迎来到寻找金币游戏！使用方向键或WASD移动',
-  '收集所有金币以通关升级，寻找木柴扩大视野',
+  '收集所有金币以开启出口，再前往绿色出口通关',
   '礼物盒会给你惊喜！点击星星可收藏此游戏',
   '每一关难度都会增加，迷宫更大，金币更多',
   '找到所有金币，挑战自己的迷宫解谜能力！',
@@ -20,7 +20,7 @@ function finish() {
   }, 500)
 }
 
-function styleFn(i) {
+function styleFn(i: number) {
   return `color:rgb(${Math.random() * 255},${Math.random() * 255}, ${
     Math.random() * 255
   });animation-delay:${i * 0.1}s;`
@@ -60,44 +60,48 @@ function toggleHelp() {
 </script>
 
 <template>
-  <div class="game-layout">
-    <main class="game-container">
-      <!-- Integrated header with title and level -->
-      <div class="game-header">
-        <div class="integrated-header">
-          <div class="header-left">
-            <div class="level-badge">
-              {{ n }}
-            </div>
-            <div class="difficulty-badge" :class="difficultyText.class">
-              {{ difficultyText.text }}
-            </div>
+  <div class="app-shell">
+    <main class="app-card">
+      <header class="app-header">
+        <div class="header-left">
+          <div class="level-badge">
+            Lv {{ n }}
           </div>
+          <div class="difficulty-badge" :class="difficultyText.class">
+            {{ difficultyText.text }}
+          </div>
+        </div>
 
-          <div class="compact-game-title" text-center>
-            {{ Title }}
-          </div>
+        <button class="app-title" type="button" title="点击切换标题" @click="finishTitle">
+          {{ Title }}
+        </button>
 
-          <div class="header-right">
-            <button class="icon-button" title="声音开关" @click="toggleSound">
-              <div :class="soundEnabled ? 'i-carbon-volume-up' : 'i-carbon-volume-mute'" />
-            </button>
-            <button class="icon-button" title="游戏帮助" @click="toggleHelp">
-              <div i-carbon-help />
-            </button>
-          </div>
+        <div class="header-right">
+          <button class="icon-button" :title="soundEnabled ? '关闭声音' : '开启声音'" @click="toggleSound">
+            <div :class="soundEnabled ? 'i-carbon-volume-up' : 'i-carbon-volume-mute'" />
+          </button>
+          <button class="icon-button" title="游戏帮助" @click="toggleHelp">
+            <div i-carbon-help />
+          </button>
+        </div>
+      </header>
+
+      <div class="objective-bar">
+        <div class="objective-pill">
+          <img src="/img/gold.svg" class="w5 h5" alt="金币">
+          <span>收集金币</span>
+          <span class="arrow">→</span>
+          <img src="/img/exit.svg" class="w5 h5" alt="出口">
+          <span>前往出口</span>
+        </div>
+        <div class="objective-hint">
+          WASD / 方向键
         </div>
       </div>
 
-      <!-- Game content area -->
       <div class="game-content">
-        <!-- Game board -->
         <Flee :sound-enabled="soundEnabled" class="game-board" />
 
-        <!-- Mobile controls (shown only on mobile) -->
-        <div class="mobile-controls show-on-mobile" />
-
-        <!-- Game info text (hidden on small screens) -->
         <div class="game-info">
           <vivid-typing
             :content="content"
@@ -110,12 +114,10 @@ function toggleHelp() {
         </div>
       </div>
 
-      <!-- Footer with game controls and social links -->
       <div class="game-footer">
         <Footer />
       </div>
 
-      <!-- Help modal -->
       <div v-if="showHelp" class="popup" @click="showHelp = false">
         <div class="popup-content" @click.stop>
           <h2 class="text-xl font-bold mb3">
@@ -123,17 +125,21 @@ function toggleHelp() {
           </h2>
           <div class="text-left text-sm">
             <p class="mb2">
-              <b>游戏目标：</b>找到迷宫中所有金币以通关升级
+              <b>游戏目标：</b>收集所有金币以开启出口，然后前往绿色出口通关
             </p>
             <p class="mb2">
-              <b>控制方式：</b>使用方向键或WASD键移动角色
+              <b>控制方式：</b>方向键 / WASD（移动受墙体阻挡）
             </p>
             <p class="mb2">
               <b>道具说明：</b>
             </p>
             <div class="flex items-center my1">
               <img src="/img/gold.svg" class="w5 h5 mr2" alt="金币">
-              <span>金币 - 收集所有金币来通关</span>
+              <span>金币 - 全部收集后出口开启</span>
+            </div>
+            <div class="flex items-center my1">
+              <img src="/img/exit.svg" class="w5 h5 mr2" alt="出口">
+              <span>出口 - 开启后抵达即可进入下一关</span>
             </div>
             <div class="flex items-center my1">
               <img src="/img/wood.svg" class="w5 h5 mr2" alt="木柴">
@@ -153,41 +159,39 @@ function toggleHelp() {
   </div>
 </template>
 
-<style>
-:root {
+<style scoped>
+:global(:root) {
   --game-max-width: 640px;
   --mobile-padding: 10px;
 }
 
-.game-layout {
+.app-shell {
   display: flex;
   justify-content: center;
   align-items: center;
   min-height: 100vh;
   padding: 10px;
-  background-color: var(--bg-color);
 }
 
-.game-container {
+.app-card {
   width: 100%;
   max-width: var(--game-max-width);
   display: flex;
   flex-direction: column;
-  border-radius: 12px;
+  border-radius: 16px;
   overflow: hidden;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-  background-color: var(--bg-color-secondary);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+  background: rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.game-header {
-  padding: 15px;
-}
-
-.integrated-header {
+.app-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  width: 100%;
+  gap: 10px;
+  padding: 14px 14px 10px;
 }
 
 .header-left, .header-right {
@@ -196,15 +200,19 @@ function toggleHelp() {
   gap: 8px;
 }
 
-.compact-game-title {
-  font-size: 1.5rem;
-  font-weight: bold;
+.app-title {
+  flex: 1;
+  text-align: center;
+  font-size: 1.35rem;
+  font-weight: 800;
   background: linear-gradient(to right, #FFD700, #FFA500);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  filter: drop-shadow(1px 1px 2px rgba(0, 0, 0, 0.5));
-  flex: 1;
-  text-align: center;
+  filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.35));
+  border: none;
+  background-color: transparent;
+  cursor: pointer;
+  padding: 6px 8px;
 }
 
 .game-content {
@@ -213,6 +221,7 @@ function toggleHelp() {
   display: flex;
   flex-direction: column;
   align-items: center;
+  padding-bottom: 10px;
 }
 
 .game-board {
@@ -222,12 +231,43 @@ function toggleHelp() {
   padding: 0 var(--mobile-padding);
 }
 
+.objective-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 14px 12px;
+}
+
+.objective-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(8px);
+  font-size: 0.9rem;
+}
+
+.objective-pill .arrow {
+  opacity: 0.65;
+}
+
+.objective-hint {
+  font-size: 0.85rem;
+  opacity: 0.8;
+  white-space: nowrap;
+}
+
 .game-info {
   margin: 15px;
   text-align: center;
   padding: 10px;
   border-radius: 8px;
-  background-color: rgba(0, 0, 0, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .game-footer {
@@ -235,41 +275,26 @@ function toggleHelp() {
 }
 
 .level-badge {
-  background-color: #7c3aed;
+  background: linear-gradient(135deg, #7c3aed, #a78bfa);
   color: white;
   font-weight: bold;
-  padding: 4px 8px;
-  border-radius: 8px;
-  min-width: 28px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  min-width: 52px;
   text-align: center;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
 }
 
 .difficulty-badge {
-  padding: 4px 8px;
-  border-radius: 8px;
-  font-size: 0.8rem;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 700;
 }
 
 .easy { background-color: #10b981; color: white; }
 .medium { background-color: #f59e0b; color: white; }
 .hard { background-color: #ef4444; color: white; }
-
-.icon-button {
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 6px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: rgba(255, 255, 255, 0.1);
-  transition: all 0.2s;
-}
-
-.icon-button:hover {
-  background-color: rgba(255, 255, 255, 0.2);
-}
 
 .popup {
   position: fixed;
@@ -310,16 +335,12 @@ function toggleHelp() {
 
 /* 移动端适配样式 */
 @media (max-width: 768px) {
-  .game-container {
+  .app-card {
     border-radius: 8px;
   }
 
-  .game-header {
-    padding: 10px;
-  }
-
-  .compact-game-title {
-    font-size: 1.2rem;
+  .app-header {
+    padding: 10px 10px 8px;
   }
 
   .game-board {
@@ -336,15 +357,18 @@ function toggleHelp() {
     padding: 8px;
   }
 
-  /* 在小屏幕上减小图标尺寸 */
-  .icon-button {
-    padding: 4px;
-  }
-
   /* 调整弹窗宽度，确保更适合移动设备 */
   .popup-content {
     width: 95%;
     padding: 15px;
+  }
+
+  .objective-bar {
+    padding: 0 10px 10px;
+  }
+
+  .objective-hint {
+    display: none;
   }
 }
 </style>

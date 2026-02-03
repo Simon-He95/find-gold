@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module'
 import {
   defineConfig,
   presetAttributify,
@@ -7,6 +8,8 @@ import {
   // transformerDirectives,
   // transformerVariantGroup,
 } from 'unocss'
+
+const require = createRequire(import.meta.url)
 
 export default defineConfig({
   shortcuts: [
@@ -19,6 +22,9 @@ export default defineConfig({
     presetIcons({
       scale: 1.2,
       warn: true,
+      collections: {
+        carbon: () => require('@iconify-json/carbon/icons.json'),
+      },
     }),
     presetWebFonts({
       fonts: {

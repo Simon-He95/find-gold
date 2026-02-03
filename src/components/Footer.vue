@@ -1,9 +1,5 @@
 <script setup lang="ts">
-import { isDark } from '~/composables'
 import { hideMask } from '../canvas'
-
-// Set dark mode by default for better game visuals
-isDark.value = true
 
 // Social links for the game
 const socialLinks = [
@@ -20,6 +16,10 @@ const socialLinks = [
     title: '收藏项目',
   },
 ]
+
+function toggleCheatMode() {
+  hideMask.value = !hideMask.value
+}
 </script>
 
 <template>
@@ -28,13 +28,13 @@ const socialLinks = [
       <div class="game-mode-toggle">
         <button
           class="icon-button"
-          :title="hideMask ? '开启作弊模式' : '关闭作弊模式'"
-          @click="hideMask = !hideMask"
+          :title="hideMask ? '关闭作弊模式' : '开启作弊模式'"
+          @click="toggleCheatMode"
         >
           <div v-if="hideMask" i-carbon-sun />
           <div v-else i-carbon-moon />
         </button>
-        <span class="mode-label hide-on-mobile text-xs">{{ hideMask ? '开启视野' : '关闭视野' }}</span>
+        <span class="mode-label hide-on-mobile text-xs">{{ hideMask ? '作弊模式' : '正常模式' }}</span>
       </div>
 
       <div class="social-links" flex="~ gap-2" items-center>
@@ -86,4 +86,3 @@ const socialLinks = [
   }
 }
 </style>
-text-xl font-bold mb3 text-yellow-400

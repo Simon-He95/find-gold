@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue'
 
-export const n = ref(5)
+export const n = ref(1)
 export const hideMask = ref(false)
 useStorage('FIND_GOLD_level', n)
 
@@ -15,7 +15,7 @@ export const w = computed(() => {
 const grid: any[] = []
 const canvas: HTMLCanvasElement = document.createElement('canvas')
 canvas.setAttribute('style', 'margin: 0 auto;')
-const ctx: CanvasRenderingContext2D = canvas.getContext('2d')!
+let ctx: CanvasRenderingContext2D = makeStubContext(canvas)
 canvas.width = WIDTH
 canvas.height = HEIGHT
 let current: Cell
@@ -28,7 +28,7 @@ export const imgTop = ref(0)
 
 // mask
 export const mask: HTMLCanvasElement = document.createElement('canvas')
-const maskCtx = mask.getContext('2d')!
+let maskCtx: CanvasRenderingContext2D = makeStubContext(mask)
 let maskX = 0
 let maskY = 0
 
@@ -40,13 +40,57 @@ export const win = ref(false)
 export const rangeScope = ref(1)
 const range = computed(() => rangeScope.value * (n.value > 5 ? w.value : w.value * 5 / n.value))
 
+export const exit = ref<{ x: number, y: number, i: number, j: number } | null>(null)
+export const exitUnlocked = ref(false)
+
 export const magnifying = ref<any[]>([])
 
 export const gift = ref<any[]>([])
 const color = ref()
 
+function safeGet2dContext(el: HTMLCanvasElement): CanvasRenderingContext2D {
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
+  const isJSDOM = /jsdom/i.test(ua)
+  if (isJSDOM)
+    return makeStubContext(el)
+
+  try {
+    const context = el.getContext('2d')
+    if (context)
+      return context
+  }
+  catch {}
+
+  return makeStubContext(el)
+}
+
+function makeStubContext(el: HTMLCanvasElement): CanvasRenderingContext2D {
+  const noop = () => {}
+  const gradient = { addColorStop: noop } as unknown as CanvasGradient
+  return {
+    canvas: el,
+    clearRect: noop,
+    fillRect: noop,
+    beginPath: noop,
+    arc: noop,
+    fill: noop,
+    stroke: noop,
+    createRadialGradient: () => gradient,
+    setTransform: noop,
+    save: noop,
+    restore: noop,
+    translate: noop,
+    scale: noop,
+    rotate: noop,
+    fillStyle: '#000',
+    strokeStyle: '#000',
+    lineWidth: 1,
+  } as unknown as CanvasRenderingContext2D
+}
+
 // 优化后的setup函数，增加难度调整
 export function setup() {
+  ctx = safeGet2dContext(canvas)
   color.value = `rgba(${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, 0.9)`
 
   // 基于关卡动态调整视野范围
@@ -56,6 +100,7 @@ export function setup() {
   imgLeft.value = 0
   imgTop.value = 0
   win.value = false
+  exitUnlocked.value = false
   grid.length = 0
   golds.length = 0
   ctx.clearRect(0, 0, WIDTH, HEIGHT)
@@ -182,42 +227,7 @@ class Cell {
   }
 }
 
-function canDerive(cur: Cell, target: Cell, map = new Set()) {
-  const stacks: Cell[] = []
-  const queue = [cur]
-  while (queue.length) {
-    const current: Cell = queue.shift()!
-    if (map.has(current))
-      continue
-    map.add(current)
-    current.status = true
-    if (current.i === target.i && current.j === target.j)
-      return true
-
-    const next = current.checkEveryNeighbors()
-    if (next) {
-      stacks.push(current)
-      queue.push(next)
-    }
-    else {
-      const pre = stacks.pop()
-      if (pre) {
-        map.delete(pre)
-        queue.push(pre)
-      }
-    }
-  }
-  const result = grid.filter(item => item.status).sort((a, b) => b.j - a.j)
-  const item = result[0]
-  const down = grid[item.index(item.i, item.j + 1)]
-  if (down) {
-    removeWalls(item, down)
-    canDerive(down, target)
-  }
-  return false
-}
-
-// 新的迷宫生成算法，确保有且只有一条通向终点的路径
+// 生成“完美迷宫”(Perfect Maze)：连通且任意两点路径唯一
 function generatePerfectMaze() {
   // 重置所有单元格
   grid.forEach((cell) => {
@@ -245,209 +255,6 @@ function generatePerfectMaze() {
       stack.pop()
     }
   }
-
-  // 确保从起点到终点有路径
-  const start = grid[0]
-  const end = grid[grid.length - 1]
-  validatePath(start, end)
-}
-
-// 验证并确保路径从起点到终点
-function validatePath(start: Cell, end: Cell) {
-  // 重置状态标志，用于路径验证
-  grid.forEach(cell => cell.status = false)
-
-  // 检查是否存在路径
-  const pathExists = findPath(start, end)
-
-  if (!pathExists) {
-    // 如果不存在路径，创建一条直接路径
-    const path = createDirectPath(start, end)
-    if (path) {
-      for (let i = 0; i < path.length - 1; i++) {
-        removeWalls(path[i], path[i + 1])
-      }
-    }
-  }
-}
-
-// 寻找从起点到终点的路径
-function findPath(start: Cell, end: Cell) {
-  const queue = [start]
-  const visited = new Set()
-  const parent = new Map()
-
-  while (queue.length > 0) {
-    const current = queue.shift()
-
-    if (current === end) {
-      // 找到路径，标记路径状态
-      const path = []
-      let temp = current
-      while (temp) {
-        path.unshift(temp)
-        temp = parent.get(temp)
-      }
-
-      // 标记路径上的单元格
-      path.forEach(cell => cell.status = true)
-      return true
-    }
-
-    if (visited.has(current))
-      continue
-    visited.add(current)
-
-    // 检查四个方向
-    const i = current.i
-    const j = current.j
-    const neighbors = []
-
-    // 上
-    if (!current.walls[0]) {
-      const top = grid[current.index(i, j - 1)]
-      if (top && !visited.has(top)) {
-        neighbors.push(top)
-      }
-    }
-
-    // 下
-    if (!current.walls[1]) {
-      const bottom = grid[current.index(i, j + 1)]
-      if (bottom && !visited.has(bottom)) {
-        neighbors.push(bottom)
-      }
-    }
-
-    // 左
-    if (!current.walls[2]) {
-      const left = grid[current.index(i - 1, j)]
-      if (left && !visited.has(left)) {
-        neighbors.push(left)
-      }
-    }
-
-    // 右
-    if (!current.walls[3]) {
-      const right = grid[current.index(i + 1, j)]
-      if (right && !visited.has(right)) {
-        neighbors.push(right)
-      }
-    }
-
-    for (const neighbor of neighbors) {
-      if (!visited.has(neighbor)) {
-        queue.push(neighbor)
-        parent.set(neighbor, current)
-      }
-    }
-  }
-
-  return false
-}
-
-// 创建一条直接路径从起点到终点
-function createDirectPath(start: Cell, end: Cell) {
-  const path = []
-  let current = start
-  path.push(current)
-
-  // 基于坐标差决定移动方向的优先级
-  const dx = end.i - start.i
-  const dy = end.j - start.j
-
-  while (current !== end) {
-    let next = null
-
-    // 优先水平移动
-    if (Math.abs(dx) > Math.abs(dy)) {
-      if (dx > 0) {
-        // 向右移动
-        next = grid[current.index(current.i + 1, current.j)]
-        if (next) {
-          current.walls[3] = false
-          next.walls[2] = false
-        }
-      }
-      else if (dx < 0) {
-        // 向左移动
-        next = grid[current.index(current.i - 1, current.j)]
-        if (next) {
-          current.walls[2] = false
-          next.walls[3] = false
-        }
-      }
-
-      if (!next) {
-        // 如果不能水平移动，尝试垂直移动
-        if (dy > 0) {
-          // 向下移动
-          next = grid[current.index(current.i, current.j + 1)]
-          if (next) {
-            current.walls[1] = false
-            next.walls[0] = false
-          }
-        }
-        else {
-          // 向上移动
-          next = grid[current.index(current.i, current.j - 1)]
-          if (next) {
-            current.walls[0] = false
-            next.walls[1] = false
-          }
-        }
-      }
-    }
-    // 优先垂直移动
-    else {
-      if (dy > 0) {
-        // 向下移动
-        next = grid[current.index(current.i, current.j + 1)]
-        if (next) {
-          current.walls[1] = false
-          next.walls[0] = false
-        }
-      }
-      else if (dy < 0) {
-        // 向上移动
-        next = grid[current.index(current.i, current.j - 1)]
-        if (next) {
-          current.walls[0] = false
-          next.walls[1] = false
-        }
-      }
-
-      if (!next) {
-        // 如果不能垂直移动，尝试水平移动
-        if (dx > 0) {
-          // 向右移动
-          next = grid[current.index(current.i + 1, current.j)]
-          if (next) {
-            current.walls[3] = false
-            next.walls[2] = false
-          }
-        }
-        else {
-          // 向左移动
-          next = grid[current.index(current.i - 1, current.j)]
-          if (next) {
-            current.walls[2] = false
-            next.walls[3] = false
-          }
-        }
-      }
-    }
-
-    if (!next) {
-      // 如果无法移动，退出循环
-      break
-    }
-
-    current = next
-    path.push(current)
-  }
-
-  return path
 }
 
 // 替换原有的draw函数
@@ -459,8 +266,67 @@ function draw() {
     grid[i].show()
   }
 
-  // 设置起点和终点
+  // 设置起点
   current = grid[0]
+
+  // 选择出口：从起点出发最远的格子（更鼓励探索）
+  const startCell = grid[0]
+  const farthest = findFarthestCell(startCell)
+  exit.value = {
+    i: farthest.i,
+    j: farthest.j,
+    x: farthest.i * w.value,
+    y: farthest.j * w.value,
+  }
+}
+
+function getOpenNeighbors(cell: Cell) {
+  const neighbors: Cell[] = []
+  if (!cell.walls[0]) {
+    const top = grid[cell.index(cell.i, cell.j - 1)]
+    if (top)
+      neighbors.push(top)
+  }
+  if (!cell.walls[1]) {
+    const bottom = grid[cell.index(cell.i, cell.j + 1)]
+    if (bottom)
+      neighbors.push(bottom)
+  }
+  if (!cell.walls[2]) {
+    const left = grid[cell.index(cell.i - 1, cell.j)]
+    if (left)
+      neighbors.push(left)
+  }
+  if (!cell.walls[3]) {
+    const right = grid[cell.index(cell.i + 1, cell.j)]
+    if (right)
+      neighbors.push(right)
+  }
+  return neighbors
+}
+
+function findFarthestCell(from: Cell) {
+  const visited = new Set<Cell>()
+  const queue: Array<{ cell: Cell, d: number }> = [{ cell: from, d: 0 }]
+  visited.add(from)
+  let farthest = from
+  let farthestDistance = 0
+
+  while (queue.length) {
+    const { cell, d } = queue.shift()!
+    if (d >= farthestDistance) {
+      farthest = cell
+      farthestDistance = d
+    }
+    for (const next of getOpenNeighbors(cell)) {
+      if (visited.has(next))
+        continue
+      visited.add(next)
+      queue.push({ cell: next, d: d + 1 })
+    }
+  }
+
+  return farthest
 }
 
 function removeWalls(a: Cell, b: Cell) {
@@ -535,6 +401,7 @@ export function downMove() {
 let stepClear = 1
 
 export function initMask() {
+  maskCtx = safeGet2dContext(mask)
   maskX = 0
   maskY = 0
   stepClear = 1
@@ -549,7 +416,7 @@ export function initMask() {
 export function updateMask() {
   stepClear = 1
   drawCircle(WIDTH + w.value / 2, WIDTH + w.value / 2, range.value)
-  mask.setAttribute('style', `position:absolute;left:-${WIDTH}px;top:-${WIDTH}px;z-index:10;transform:translate(${maskX}px, ${maskY}px`)
+  mask.setAttribute('style', `position:absolute;left:-${WIDTH}px;top:-${WIDTH}px;z-index:10;transform:translate(${maskX}px, ${maskY}px)`)
 }
 
 function clearArc(x: number, y: number, radius: number) {
@@ -620,79 +487,56 @@ export function getGold() {
 
 // 优化金币生成逻辑，确保每一关都有金币
 function randomGold() {
-  const left: Cell = grid[grid.length - rows.value]
-  const right: Cell = grid[rows.value - 1]
+  const reserved = new Set<string>()
+  reserved.add('0-0')
+  if (exit.value)
+    reserved.add(`${exit.value.i}-${exit.value.j}`)
 
-  // 创建默认的固定位置金币（无论任何关卡级别）
-  const defaultGoldPositions = [
-    { i: Math.floor(rows.value / 3), j: Math.floor(cols.value / 3) },
-    { i: Math.floor(rows.value * 2 / 3), j: Math.floor(cols.value / 3) },
-    { i: Math.floor(rows.value / 3), j: Math.floor(cols.value * 2 / 3) },
-    { i: Math.floor(rows.value * 2 / 3), j: Math.floor(cols.value * 2 / 3) },
-    { i: Math.floor(rows.value / 2), j: Math.floor(cols.value / 2) },
+  const all = grid.map(cell => ({ i: cell.i, j: cell.j }))
+  const available = all.filter(p => !reserved.has(`${p.i}-${p.j}`))
+
+  const goldCount = Math.max(1, Math.min(n.value, available.length))
+  const chosen: Array<{ i: number, j: number }> = []
+  const chosenKey = new Set<string>()
+
+  function tryAdd(i: number, j: number) {
+    const key = `${i}-${j}`
+    if (reserved.has(key) || chosenKey.has(key))
+      return false
+    if (i < 0 || j < 0 || i > cols.value - 1 || j > rows.value - 1)
+      return false
+    chosen.push({ i, j })
+    chosenKey.add(key)
+    return true
+  }
+
+  const iMid = Math.floor(cols.value / 2)
+  const jMid = Math.floor(rows.value / 2)
+  const preferred = [
+    [iMid, jMid],
+    [cols.value - 1, 0],
+    [0, rows.value - 1],
+    [cols.value - 1, rows.value - 1],
+    [Math.floor(cols.value / 3), Math.floor(rows.value / 3)],
+    [Math.floor(cols.value * 2 / 3), Math.floor(rows.value / 3)],
+    [Math.floor(cols.value / 3), Math.floor(rows.value * 2 / 3)],
+    [Math.floor(cols.value * 2 / 3), Math.floor(rows.value * 2 / 3)],
   ]
 
-  // 金币结果数组
-  let goldResult: any[] = []
-  // 所有道具结果数组（包括金币、柴火和礼物）
-  let allItemsResult: any[] = []
-
-  // 根据关卡级别进行不同处理
-  if (n.value <= 3) {
-    // 低级别：使用默认金币位置
-    goldResult = defaultGoldPositions.slice(0, n.value)
-  }
-  else if (n.value < 8) {
-    // 中级别：使用通用金币位置加上一些特殊位置
-    goldResult = [grid[grid.length - 1], left, right].map(cell => ({ i: cell.i, j: cell.j }))
-
-    // 从默认位置中获取额外金币
-    const additionalCount = n.value - 3
-    for (let i = 0; i < additionalCount && i < defaultGoldPositions.length; i++) {
-      goldResult.push(defaultGoldPositions[i])
-    }
-  }
-  else {
-    // 高级别：使用随机位置
-    const goldPositions: any[] = []
-    const goldCount = n.value
-
-    // 先尝试使用golds数组
-    if (golds.length >= goldCount) {
-      for (let i = 0; i < goldCount; i++) {
-        const index = Math.floor(Math.random() * golds.length)
-        const gold = golds[index]
-        if (gold && !goldPositions.some(p => p.i === gold.i && p.j === gold.j)) {
-          goldPositions.push({ i: gold.i, j: gold.j })
-        }
-        else {
-          i--
-        }
-      }
-    }
-    else {
-      // 如果golds数组不够，使用随机位置
-      for (let i = 0; i < goldCount; i++) {
-        const position = {
-          i: Math.floor(Math.random() * rows.value),
-          j: Math.floor(Math.random() * cols.value),
-        }
-
-        // 避免和已有位置重复
-        if (!goldPositions.some(p => p.i === position.i && p.j === position.j)) {
-          goldPositions.push(position)
-        }
-        else {
-          i--
-        }
-      }
-    }
-
-    goldResult = goldPositions
+  for (const [i, j] of preferred) {
+    if (chosen.length >= goldCount)
+      break
+    tryAdd(i, j)
   }
 
-  // 记录所有金币位置，用于调试
-  console.log('金币位置:', goldResult.map(pos => `${pos.i}-${pos.j}`).join(', '))
+  while (chosen.length < goldCount) {
+    const pos = available[Math.floor(Math.random() * available.length)]
+    if (!pos)
+      break
+    tryAdd(pos.i, pos.j)
+  }
+
+  const goldResult = chosen
 
   // 创建一个共享的位置管理器，用于确保所有道具不重叠
   // 使用Map而不是Set，这样可以存储更多信息，包括位置和类型
@@ -703,13 +547,14 @@ function randomGold() {
     const key = `${pos.i}-${pos.j}`
     usedPositionsMap.set(key, 'gold')
   })
+  if (exit.value)
+    usedPositionsMap.set(`${exit.value.i}-${exit.value.j}`, 'exit')
 
   const itemPositionManager = {
     usedPositionsMap,
     addPosition(i: number, j: number, type: string) {
       const key = `${i}-${j}`
       if (this.usedPositionsMap.has(key)) {
-        console.warn(`尝试将${type}添加到已有${this.usedPositionsMap.get(key)}的位置: ${key}`)
         return false
       }
       this.usedPositionsMap.set(key, type)
@@ -717,25 +562,12 @@ function randomGold() {
     },
     hasPosition(i: number, j: number) {
       const key = `${i}-${j}`
-      const exists = this.usedPositionsMap.has(key)
-      if (exists) {
-        const type = this.usedPositionsMap.get(key)
-        if (type === 'gold') {
-          console.warn(`位置 ${key} 已被金币占用`)
-        }
-        else {
-          console.warn(`位置 ${key} 已被 ${type} 占用`)
-        }
-      }
-      return exists
+      return this.usedPositionsMap.has(key)
     },
     getAllPositions() {
       return Array.from(this.usedPositionsMap.entries()).map(([key, type]) => ({ pos: key, type }))
     },
   }
-
-  // 全量复制金币位置到所有道具结果数组
-  allItemsResult = JSON.parse(JSON.stringify(goldResult))
 
   // 道具数量基于难度调整
   let magnifyingCount = 0
@@ -757,10 +589,7 @@ function randomGold() {
   // 生成柴火和礼物，确保它们之间不会互相重叠，也不会与金币重叠
   generateItems(itemPositionManager, magnifyingCount, giftCount)
 
-  // 调试：打印所有位置信息
-  console.log('所有道具位置:', itemPositionManager.getAllPositions())
-
-  return allItemsResult
+  return goldResult
 }
 
 // 新增：统一的道具生成函数，确保柴火和礼物不会互相重叠
@@ -920,9 +749,6 @@ function generateItems(positionManager: { usedPositionsMap: Map<string, string>,
     const image = document.createElement('img')
     image.src = img.src
   })
-
-  console.log('柴火数量:', magnifying.value.length)
-  console.log('礼物数量:', gift.value.length)
 }
 
 function getRandomImage() {
