@@ -12,7 +12,7 @@ export const w = computed(() => {
   // 调整单元格大小，确保能够均匀分布（避免边缘黑边）
   return Math.floor(WIDTH / Math.floor(WIDTH / minSize))
 })
-const grid: any[] = []
+const grid: Cell[] = []
 const canvas: HTMLCanvasElement = document.createElement('canvas')
 canvas.setAttribute('style', 'margin: 0 auto;')
 let ctx: CanvasRenderingContext2D = makeStubContext(canvas)
@@ -189,11 +189,10 @@ export function setup() {
   ctx.fillStyle = '#000'
   ctx.fillRect(0, 0, WIDTH, HEIGHT)
 
-  // 动态调整迷宫大小，随关卡增加
-  for (let i = 0; i < cols.value; i++) {
-    for (let j = 0; j < rows.value; j++) {
-      const cell = new Cell(j, i)
-      grid.push(cell)
+  // 动态调整迷宫大小，随关卡增加（按 row-major: i + j * cols）
+  for (let j = 0; j < rows.value; j++) {
+    for (let i = 0; i < cols.value; i++) {
+      grid.push(new Cell(i, j))
     }
   }
 
@@ -488,7 +487,7 @@ export function rightMove() {
   const right = grid[current.index(current.i + 1, current.j)]
   if (current.walls[3] || !right || right.walls[2])
     return false
-  if (imgLeft.value < (rows.value - 1) * w.value) {
+  if (imgLeft.value < (cols.value - 1) * w.value) {
     imgLeft.value += w.value
     mask.style.transform = `translate(${maskX += w.value}px, ${maskY}px)`
   }
@@ -524,7 +523,7 @@ export function downMove() {
   const down = grid[current.index(current.i, current.j + 1)]
   if (current.walls[1] || !down || down.walls[0])
     return false
-  if (imgTop.value < (cols.value - 1) * w.value) {
+  if (imgTop.value < (rows.value - 1) * w.value) {
     imgTop.value += w.value
     mask.style.transform = `translate(${maskX}px, ${maskY += w.value}px)`
   }
@@ -540,17 +539,17 @@ export function initMask() {
   maskY = 0
   stepClear = 1
   mask.width = 2 * WIDTH
-  mask.height = 2 * WIDTH
-  drawCircle(WIDTH + w.value / 2, WIDTH + w.value / 2, range.value)
-  mask.setAttribute('style', `position:absolute;left:-${WIDTH}px;top:-${WIDTH}px;z-index:10`)
+  mask.height = 2 * HEIGHT
+  drawCircle(WIDTH + w.value / 2, HEIGHT + w.value / 2, range.value)
+  mask.setAttribute('style', `position:absolute;left:-${WIDTH}px;top:-${HEIGHT}px;z-index:10`)
 
   return mask
 }
 
 export function updateMask() {
   stepClear = 1
-  drawCircle(WIDTH + w.value / 2, WIDTH + w.value / 2, range.value)
-  mask.setAttribute('style', `position:absolute;left:-${WIDTH}px;top:-${WIDTH}px;z-index:10;transform:translate(${maskX}px, ${maskY}px)`)
+  drawCircle(WIDTH + w.value / 2, HEIGHT + w.value / 2, range.value)
+  mask.setAttribute('style', `position:absolute;left:-${WIDTH}px;top:-${HEIGHT}px;z-index:10;transform:translate(${maskX}px, ${maskY}px)`)
 }
 
 function clearArc(x: number, y: number, radius: number) {
