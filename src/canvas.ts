@@ -46,7 +46,24 @@ export const exitUnlocked = ref(false)
 export const magnifying = ref<any[]>([])
 
 export const gift = ref<any[]>([])
-const color = ref()
+
+interface MazeTheme {
+  wall: [number, number, number]
+  wallHi: [number, number, number]
+  wallLo: [number, number, number]
+  wallStroke: [number, number, number]
+  floor: [number, number, number]
+  floorHi: [number, number, number]
+}
+
+const theme = ref<MazeTheme>({
+  wall: [140, 110, 255],
+  wallHi: [200, 180, 255],
+  wallLo: [70, 45, 160],
+  wallStroke: [20, 16, 40],
+  floor: [10, 12, 18],
+  floorHi: [18, 22, 34],
+})
 
 function safeGet2dContext(el: HTMLCanvasElement): CanvasRenderingContext2D {
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
@@ -88,10 +105,75 @@ function makeStubContext(el: HTMLCanvasElement): CanvasRenderingContext2D {
   } as unknown as CanvasRenderingContext2D
 }
 
+function clampInt(n: number) {
+  return Math.max(0, Math.min(255, Math.round(n)))
+}
+
+function mix(a: [number, number, number], b: [number, number, number], t: number): [number, number, number] {
+  return [
+    clampInt(a[0] + (b[0] - a[0]) * t),
+    clampInt(a[1] + (b[1] - a[1]) * t),
+    clampInt(a[2] + (b[2] - a[2]) * t),
+  ]
+}
+
+function rgba(c: [number, number, number], alpha = 1) {
+  return `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${alpha})`
+}
+
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  const c = (1 - Math.abs(2 * l - 1)) * s
+  const hp = (h % 360) / 60
+  const x = c * (1 - Math.abs((hp % 2) - 1))
+  let r1 = 0
+  let g1 = 0
+  let b1 = 0
+  if (hp >= 0 && hp < 1) {
+    [r1, g1, b1] = [c, x, 0]
+  }
+  else if (hp >= 1 && hp < 2) {
+    [r1, g1, b1] = [x, c, 0]
+  }
+  else if (hp >= 2 && hp < 3) {
+    [r1, g1, b1] = [0, c, x]
+  }
+  else if (hp >= 3 && hp < 4) {
+    [r1, g1, b1] = [0, x, c]
+  }
+  else if (hp >= 4 && hp < 5) {
+    [r1, g1, b1] = [x, 0, c]
+  }
+  else {
+    [r1, g1, b1] = [c, 0, x]
+  }
+
+  const m = l - c / 2
+  return [
+    clampInt((r1 + m) * 255),
+    clampInt((g1 + m) * 255),
+    clampInt((b1 + m) * 255),
+  ]
+}
+
+function hash2(i: number, j: number) {
+  // deterministic tiny noise for floor texture
+  let x = (i * 73856093) ^ (j * 19349663)
+  x = (x ^ (x >>> 13)) >>> 0
+  x = (x * 1274126177) >>> 0
+  return x / 0xFFFFFFFF
+}
+
 // 优化后的setup函数，增加难度调整
 export function setup() {
   ctx = safeGet2dContext(canvas)
-  color.value = `rgba(${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, 0.9)`
+  const h = Math.floor(Math.random() * 360)
+  const wall = hslToRgb(h, 0.72, 0.55)
+  const wallHi = mix(wall, [255, 255, 255], 0.35)
+  const wallLo = mix(wall, [0, 0, 0], 0.55)
+  const wallStroke = mix(wall, [0, 0, 0], 0.8)
+  const floor = mix(wall, [8, 10, 16], 0.8)
+  const floorHi = mix(floor, [255, 255, 255], 0.06)
+  theme.value = { wall, wallHi, wallLo, wallStroke, floor, floorHi }
 
   // 基于关卡动态调整视野范围
   rangeScope.value = Math.max(0.6, 1.2 - (n.value * 0.04)) // 随着关卡增加，初始视野会逐渐减小
@@ -140,30 +222,67 @@ class Cell {
   show() {
     const x = this.i * w.value
     const y = this.j * w.value
-    const wallThickness = Math.max(2, Math.min(5, w.value / 5)) // Wall thickness is proportional but capped
+    const size = w.value
+    const wallThickness = Math.max(2, Math.min(7, Math.floor(size / 5)))
+    const depth = Math.max(2, Math.min(7, Math.floor(wallThickness * 1.15)))
 
-    // Draw the cell background
-    ctx.fillStyle = 'black'
-    ctx.fillRect(x, y, w.value, w.value)
+    // --- Floor tile (pseudo 3D) ---
+    const noise = hash2(this.i, this.j)
+    const floorJitter = (noise - 0.5) * 10
+    const floorColor = [
+      clampInt(theme.value.floor[0] + floorJitter),
+      clampInt(theme.value.floor[1] + floorJitter),
+      clampInt(theme.value.floor[2] + floorJitter),
+    ] as [number, number, number]
+    ctx.fillStyle = rgba(floorColor, 1)
+    ctx.fillRect(x, y, size, size)
 
-    // Draw walls as solid blocks instead of lines
-    ctx.fillStyle = color.value
+    // subtle vignette inside cell
+    ctx.fillStyle = rgba(theme.value.floorHi, 0.18)
+    ctx.fillRect(x + 1, y + 1, size - 2, size - 2)
 
-    // Top wall
+    const drawWall = (wx: number, wy: number, ww: number, wh: number, dir: 'h' | 'v') => {
+      // shadow (down-right)
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.25)'
+      ctx.fillRect(wx + depth, wy + depth, ww, wh)
+
+      // body gradient
+      const g = dir === 'h'
+        ? ctx.createLinearGradient(wx, wy, wx, wy + wh)
+        : ctx.createLinearGradient(wx, wy, wx + ww, wy)
+      g.addColorStop(0, rgba(theme.value.wallHi, 1))
+      g.addColorStop(0.45, rgba(theme.value.wall, 1))
+      g.addColorStop(1, rgba(theme.value.wallLo, 1))
+      ctx.fillStyle = g
+      ctx.fillRect(wx, wy, ww, wh)
+
+      // bevel highlight + stroke
+      ctx.fillStyle = rgba(theme.value.wallHi, 0.8)
+      if (dir === 'h')
+        ctx.fillRect(wx, wy, ww, 1)
+      else
+        ctx.fillRect(wx, wy, 1, wh)
+
+      ctx.fillStyle = rgba(theme.value.wallStroke, 0.75)
+      if (dir === 'h')
+        ctx.fillRect(wx, wy + wh - 1, ww, 1)
+      else
+        ctx.fillRect(wx + ww - 1, wy, 1, wh)
+    }
+
+    // --- Walls ---
+    // avoid double-draw: only render top/left, plus border bottom/right
     if (this.walls[0])
-      ctx.fillRect(x, y, w.value, wallThickness)
+      drawWall(x, y, size, wallThickness, 'h')
 
-    // Bottom wall
-    if (this.walls[1])
-      ctx.fillRect(x, y + w.value - wallThickness, w.value, wallThickness)
-
-    // Left wall
     if (this.walls[2])
-      ctx.fillRect(x, y, wallThickness, w.value)
+      drawWall(x, y, wallThickness, size, 'v')
 
-    // Right wall
-    if (this.walls[3])
-      ctx.fillRect(x + w.value - wallThickness, y, wallThickness, w.value)
+    if (this.j === rows.value - 1 && this.walls[1])
+      drawWall(x, y + size - wallThickness, size, wallThickness, 'h')
+
+    if (this.i === cols.value - 1 && this.walls[3])
+      drawWall(x + size - wallThickness, y, wallThickness, size, 'v')
   }
 
   // The line method is no longer needed, but we'll keep it for compatibility
@@ -261,10 +380,25 @@ function generatePerfectMaze() {
 function draw() {
   generatePerfectMaze()
 
+  // Base floor (pseudo-3D ambience)
+  ctx.clearRect(0, 0, WIDTH, HEIGHT)
+  ctx.fillStyle = 'rgba(6, 8, 12, 1)'
+  ctx.fillRect(0, 0, WIDTH, HEIGHT)
+  const glow = ctx.createRadialGradient(WIDTH * 0.45, HEIGHT * 0.35, 0, WIDTH * 0.45, HEIGHT * 0.35, WIDTH * 0.95)
+  glow.addColorStop(0, rgba(theme.value.floorHi, 0.35))
+  glow.addColorStop(1, 'rgba(0, 0, 0, 0)')
+  ctx.fillStyle = glow
+  ctx.fillRect(0, 0, WIDTH, HEIGHT)
+
   // 绘制迷宫
   for (let i = 0; i < grid.length; i++) {
     grid[i].show()
   }
+
+  // Outer frame for crisp edges
+  ctx.strokeStyle = rgba(theme.value.wallStroke, 0.45)
+  ctx.lineWidth = Math.max(2, Math.min(5, Math.floor(w.value / 8)))
+  ctx.strokeRect(1, 1, WIDTH - 2, HEIGHT - 2)
 
   // 设置起点
   current = grid[0]

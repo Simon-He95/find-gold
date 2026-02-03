@@ -452,7 +452,7 @@ function winSound() {
         <span class="stat-value">{{ countDown }}秒</span>
       </div>
       <div class="stat-item">
-        <img src="/img/gold.svg" w-6 class="gold-item" :class="[animate && 'win-animation']" alt="gold">
+        <img src="/img/gold.svg" w-6 class="hud-gold" :class="[animate && 'win-animation']" alt="gold">
         <span class="stat-value">{{ remainingGold }}</span>
         <span class="stat-sub">/ {{ totalGold }}</span>
       </div>
@@ -476,14 +476,20 @@ function winSound() {
     <div ref="FleeEl" relative overflow-hidden rounded-lg class="game-board-container" :class="{ bump: bumping }">
       <!-- Player character -->
       <img
-        absolute src="/img/fire.svg" :style="{ width: `${w}px`, left: `${imgLeft}px`, top: `${imgTop}px` }"
-        class="player" alt="fire"
+        absolute
+        src="/img/fire.svg"
+        :style="{ width: `${w}px`, left: `${imgLeft}px`, top: `${imgTop}px` }"
+        class="player"
+        alt="fire"
       >
       <!-- Gold items -->
       <template v-for="item in goldArray" :key="`${item.i}-${item.j}`">
         <img
-          v-if="item.show" src="/img/gold.svg"
-          :style="{ width: `${w * 0.75}px`, left: `${item.x + 3}px`, top: `${item.y + 3}px` }" absolute class="gold-item"
+          v-if="item.show"
+          src="/img/gold.svg"
+          :style="{ width: `${w * 0.75}px`, left: `${item.x + 3}px`, top: `${item.y + 3}px` }"
+          absolute
+          class="gold-item"
           alt="gold"
         >
       </template>
@@ -660,6 +666,26 @@ function winSound() {
   @keyframes exitPulse {
     0%, 100% { transform: scale(1); filter: drop-shadow(0 0 10px rgba(34, 197, 94, 0.45)); }
     50% { transform: scale(1.04); filter: drop-shadow(0 0 16px rgba(34, 197, 94, 0.75)); }
+  }
+
+  .game-board-container .player {
+    filter: drop-shadow(0 10px 10px rgba(0, 0, 0, 0.55)) drop-shadow(0 0 10px rgba(255, 140, 0, 0.2));
+    transition: transform 120ms ease;
+    transform-origin: 50% 70%;
+  }
+
+  .game-board-container .gold-item {
+    filter: drop-shadow(0 10px 10px rgba(0, 0, 0, 0.55)) drop-shadow(0 0 18px rgba(255, 215, 0, 0.25));
+    animation: floatGold 1.9s ease-in-out infinite;
+  }
+
+  .hud-gold {
+    filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.45));
+  }
+
+  @keyframes floatGold {
+    0%, 100% { transform: translateY(0) rotate(-2deg); }
+    50% { transform: translateY(-2px) rotate(2deg); }
   }
 
   .game-board-container {
