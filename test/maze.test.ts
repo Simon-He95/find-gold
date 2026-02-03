@@ -159,4 +159,43 @@ describe('grid collision', () => {
       rnd.mockRestore()
     }
   })
+
+  it('does not tunnel through multiple cells on large deltas', () => {
+    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.42)
+    try {
+      setup()
+      const snap = getMazeSnapshot()
+      const cfg = { cellSize: 1, radius: 0.2, height: 1.6, epsilon: 0.001 }
+
+      let found: { i: number, j: number } | null = null
+
+      // Find pattern: open between (i,j)->(i+1,j), but closed between (i+1,j)->(i+2,j)
+      for (let j = 0; j < snap.rows; j++) {
+        for (let i = 0; i < snap.cols - 2; i++) {
+          const c0 = getCell(snap, i, j)!
+          const c1 = getCell(snap, i + 1, j)!
+          if (!c0.walls[3] && c1.walls[3]) {
+            found = { i, j }
+            break
+          }
+        }
+        if (found)
+          break
+      }
+
+      expect(found).not.toBeNull()
+      const { i, j } = found!
+
+      const start = { x: i + 0.5, y: 0.55, z: j + 0.5 }
+      const moved = moveWithGridCollisions(snap, cfg, start, 2.4, 0)
+
+      // should not pass the wall at the right edge of cell (i+1,j)
+      const maxLocal = cfg.cellSize - cfg.radius - cfg.epsilon
+      const maxX = (i + 1) * cfg.cellSize + maxLocal
+      expect(moved.x).toBeLessThanOrEqual(maxX + 1e-6)
+    }
+    finally {
+      rnd.mockRestore()
+    }
+  })
 })

@@ -35,11 +35,23 @@ export function moveWithGridCollisions(
   dx: number,
   dz: number,
 ) {
-  // Move X then Z (separable axis collision).
-  const next = { ...player }
-  next.x = resolveAxis(snapshot, cfg, player.x, player.z, dx, 'x')
-  next.z = resolveAxis(snapshot, cfg, next.x, player.z, dz, 'z')
-  return next
+  // Move with sub-steps to avoid "tunneling" through multiple cells on large deltas.
+  const maxDelta = Math.max(Math.abs(dx), Math.abs(dz))
+  const maxStep = Math.max(0.01, cfg.cellSize * 0.25)
+  const steps = Math.max(1, Math.ceil(maxDelta / maxStep))
+
+  let x = player.x
+  let z = player.z
+
+  const stepX = dx / steps
+  const stepZ = dz / steps
+
+  for (let s = 0; s < steps; s++) {
+    x = resolveAxis(snapshot, cfg, x, z, stepX, 'x')
+    z = resolveAxis(snapshot, cfg, x, z, stepZ, 'z')
+  }
+
+  return { ...player, x, z }
 }
 
 function resolveAxis(
