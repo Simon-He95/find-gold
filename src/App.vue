@@ -76,8 +76,13 @@ function toggleViewMode() {
 const fsTarget = ref<HTMLElement | null>(null)
 const isFullscreen = ref(false)
 
+function getFullscreenElement() {
+  const anyDoc = document as any
+  return (document.fullscreenElement ?? anyDoc.webkitFullscreenElement ?? null) as Element | null
+}
+
 function syncFullscreen() {
-  isFullscreen.value = document.fullscreenElement === fsTarget.value
+  isFullscreen.value = getFullscreenElement() === fsTarget.value
 }
 
 async function toggleFullscreen() {
@@ -86,7 +91,7 @@ async function toggleFullscreen() {
     return
 
   try {
-    if (!document.fullscreenElement) {
+    if (!getFullscreenElement()) {
       const anyEl = el as any
       await (anyEl.requestFullscreen?.() ?? anyEl.webkitRequestFullscreen?.())
     }
@@ -567,5 +572,54 @@ function onGlobalKeyDown(e: KeyboardEvent) {
   .objective-hint {
     display: none;
   }
+}
+</style>
+
+<style>
+/* Fullscreen: keep this unscoped to reliably override child SFC scoped styles. */
+.game-stage:fullscreen,
+.game-stage:-webkit-full-screen {
+  width: 100vw !important;
+  height: 100vh !important;
+  display: block !important;
+  background: radial-gradient(circle at 40% 30%, rgba(15, 23, 42, 0.65), rgba(0, 0, 0, 0.85)) !important;
+}
+
+.game-stage:fullscreen .game-board,
+.game-stage:-webkit-full-screen .game-board {
+  width: 100% !important;
+  height: 100% !important;
+  padding: 0 !important;
+  display: block !important;
+}
+
+.game-stage:fullscreen .flee3d,
+.game-stage:-webkit-full-screen .flee3d {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.game-stage:fullscreen .three-root,
+.game-stage:-webkit-full-screen .three-root {
+  max-width: none !important;
+  width: 100% !important;
+  height: 100% !important;
+  aspect-ratio: auto !important;
+  border-radius: 0 !important;
+}
+
+.game-stage:fullscreen .game-board-container,
+.game-stage:-webkit-full-screen .game-board-container {
+  width: 100% !important;
+  height: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.game-stage:fullscreen .game-board-container canvas,
+.game-stage:-webkit-full-screen .game-board-container canvas {
+  width: min(100vw, 100vh) !important;
+  height: min(100vw, 100vh) !important;
 }
 </style>
