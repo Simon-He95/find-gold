@@ -42,6 +42,9 @@ const collectedGoldCount = computed(() => collectedGold(goldArray.value as any))
 const showWin = ref(false)
 const winText = ref('')
 
+const godView = useStorage<boolean>('FIND_GOLD_god_view', false)
+const minimapEl = ref<HTMLCanvasElement | null>(null)
+
 const cellSize = 1
 const wallThickness = 0.1
 const wallHeight = 1.25
@@ -72,6 +75,7 @@ let yaw = 0
 let pitch = 0
 let yawTarget = 0
 let pitchTarget = 0
+let minimapTick = 0
 
 const player = reactive({ x: 0.5, y: 0.55, z: 0.5 })
 let lastCell = { i: 0, j: 0 }
@@ -129,8 +133,13 @@ function onKeyDown(e: KeyboardEvent) {
   if (isInputLocked())
     return
 
-  if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ShiftLeft', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code))
+  if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'KeyM', 'ShiftLeft', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code))
     e.preventDefault()
+
+  if (e.code === 'KeyM') {
+    godView.value = !godView.value
+    return
+  }
 
   keys.add(e.code)
   if (e.code === 'KeyQ')
@@ -285,6 +294,7 @@ function start3DLevel() {
   pitch = 0
   yawTarget = 0
   pitchTarget = 0
+  minimapTick = 0
 
   if (!scene || !mazeGroup)
     return
@@ -519,6 +529,14 @@ function animate() {
     return
 
   const dt = Math.min(0.04, clock.getDelta())
+  if (godView.value) {
+    minimapTick += dt
+    if (minimapTick > 0.12) {
+      minimapTick = 0
+      renderMinimap()
+    }
+  }
+
   if (!paused.value && locked.value && !isInputLocked()) {
     const forward = new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(0, yaw, 0, 'YXZ'))
     const right = new THREE.Vector3(1, 0, 0).applyEuler(new THREE.Euler(0, yaw, 0, 'YXZ'))
@@ -583,6 +601,95 @@ function animate() {
 
   setCameraPose()
   renderer.render(scene, camera)
+}
+
+function renderMinimap() {
+  const canvas = minimapEl.value
+  if (!canvas)
+    return
+  const ctx = canvas.getContext('2d')
+  if (!ctx)
+    return
+
+  const snap = getMazeSnapshot()
+  const w = canvas.width
+  const h = canvas.height
+  ctx.clearRect(0, 0, w, h)
+
+  const pad = 10
+  const size = Math.min(w, h) - pad * 2
+  const cell = size / Math.max(snap.cols, snap.rows)
+  const ox = (w - cell * snap.cols) / 2
+  const oy = (h - cell * snap.rows) / 2
+
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'
+  ctx.fillRect(0, 0, w, h)
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.8)'
+  ctx.fillRect(ox - 6, oy - 6, cell * snap.cols + 12, cell * snap.rows + 12)
+
+  // walls
+  ctx.strokeStyle = 'rgba(226, 232, 240, 0.65)'
+  ctx.lineWidth = Math.max(1, Math.floor(cell / 10))
+  ctx.beginPath()
+  for (const c of snap.cells) {
+    const x = ox + c.i * cell
+    const y = oy + c.j * cell
+    if (c.walls[0]) { // top
+      ctx.moveTo(x, y)
+      ctx.lineTo(x + cell, y)
+    }
+    if (c.walls[2]) { // left
+      ctx.moveTo(x, y)
+      ctx.lineTo(x, y + cell)
+    }
+    if (c.j === snap.rows - 1 && c.walls[1]) { // bottom border
+      ctx.moveTo(x, y + cell)
+      ctx.lineTo(x + cell, y + cell)
+    }
+    if (c.i === snap.cols - 1 && c.walls[3]) { // right border
+      ctx.moveTo(x + cell, y)
+      ctx.lineTo(x + cell, y + cell)
+    }
+  }
+  ctx.stroke()
+
+  // exit
+  if (snap.exit) {
+    const ex = ox + (snap.exit.i + 0.5) * cell
+    const ey = oy + (snap.exit.j + 0.5) * cell
+    ctx.fillStyle = exitUnlocked.value ? 'rgba(34,197,94,0.95)' : 'rgba(148,163,184,0.9)'
+    ctx.beginPath()
+    ctx.rect(ex - cell * 0.18, ey - cell * 0.18, cell * 0.36, cell * 0.36)
+    ctx.fill()
+  }
+
+  // gold (remaining bright, collected dim)
+  for (const g of goldArray.value as any[]) {
+    const gx = ox + (g.i + 0.5) * cell
+    const gy = oy + (g.j + 0.5) * cell
+    ctx.fillStyle = g.show ? 'rgba(251,191,36,0.95)' : 'rgba(251,191,36,0.18)'
+    ctx.beginPath()
+    ctx.arc(gx, gy, Math.max(2, cell * (g.show ? 0.12 : 0.08)), 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  // player (dot + facing)
+  const p = cellFromWorld(player.x, player.z, 1, snap.cols, snap.rows)
+  const px = ox + (p.i + 0.5) * cell
+  const py = oy + (p.j + 0.5) * cell
+  ctx.fillStyle = 'rgba(96,165,250,0.95)'
+  ctx.beginPath()
+  ctx.arc(px, py, Math.max(2.5, cell * 0.14), 0, Math.PI * 2)
+  ctx.fill()
+
+  const dir = -yaw
+  const len = Math.max(6, cell * 0.35)
+  ctx.strokeStyle = 'rgba(147, 197, 253, 0.95)'
+  ctx.lineWidth = Math.max(1, Math.floor(cell / 9))
+  ctx.beginPath()
+  ctx.moveTo(px, py)
+  ctx.lineTo(px + Math.cos(dir) * len, py + Math.sin(dir) * len)
+  ctx.stroke()
 }
 
 onMounted(() => {
@@ -659,9 +766,19 @@ const exitHint = computed(() => {
         <div class="pill wide">
           <span class="label">{{ exitHint }}</span>
         </div>
+        <button class="pill pill-btn" type="button" :title="godView ? '关闭上帝视角 (M)' : '开启上帝视角 (M)'" @click="godView = !godView">
+          <span class="label">{{ godView ? '上帝视角：开' : '上帝视角：关' }}</span>
+        </button>
       </div>
 
       <div class="crosshair" />
+
+      <div v-if="godView" class="minimap">
+        <canvas ref="minimapEl" width="220" height="220" />
+        <div class="minimap-hint">
+          M 关闭
+        </div>
+      </div>
 
       <div v-if="paused" class="overlay">
         <div class="card">
@@ -672,6 +789,7 @@ const exitHint = computed(() => {
             点击画面进入（锁定鼠标）<br>
             移动：WASD  冲刺：Shift<br>
             转角：Q / E（顺滑转身）<br>
+            小地图：M（上帝视角）<br>
             退出：Esc
           </div>
           <button class="btn" type="button">
@@ -738,6 +856,47 @@ const exitHint = computed(() => {
 
 .pill.wide {
   padding-right: 14px;
+}
+
+.pill-btn {
+  cursor: pointer;
+}
+
+.pill-btn:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.minimap {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 6;
+  width: 220px;
+  height: 220px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.minimap canvas {
+  width: 220px;
+  height: 220px;
+  display: block;
+}
+
+.minimap-hint {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(8px);
 }
 
 .label {
