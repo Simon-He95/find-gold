@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module'
+import process from 'node:process'
 import {
   defineConfig,
   presetAttributify,
@@ -10,6 +11,7 @@ import {
 } from 'unocss'
 
 const require = createRequire(import.meta.url)
+const isTest = !!process.env.VITEST || process.env.NODE_ENV === 'test'
 
 export default defineConfig({
   shortcuts: [
@@ -26,13 +28,17 @@ export default defineConfig({
         carbon: () => require('@iconify-json/carbon/icons.json'),
       },
     }),
-    presetWebFonts({
-      fonts: {
-        sans: 'DM Sans',
-        serif: 'DM Serif Display',
-        mono: 'DM Mono',
-      },
-    }),
+    ...(isTest
+      ? []
+      : [
+          presetWebFonts({
+            fonts: {
+              sans: 'DM Sans',
+              serif: 'DM Serif Display',
+              mono: 'DM Mono',
+            },
+          }),
+        ]),
   ],
   // transformers: [
   //   transformerDirectives(),
