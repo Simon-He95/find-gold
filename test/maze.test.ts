@@ -233,4 +233,85 @@ describe('grid collision', () => {
       rnd.mockRestore()
     }
   })
+
+  it('crosses an open passage when moving toward it', () => {
+    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.42)
+    try {
+      setup()
+      const snap = getMazeSnapshot()
+      const cfg = { cellSize: 1, radius: 0.2, height: 1.6, epsilon: 0.001 }
+
+      let picked: { i: number, j: number } | null = null
+      for (let j = 0; j < snap.rows; j++) {
+        for (let i = 0; i < snap.cols - 1; i++) {
+          const cell = getCell(snap, i, j)!
+          if (!cell.walls[3]) {
+            picked = { i, j }
+            break
+          }
+        }
+        if (picked)
+          break
+      }
+
+      expect(picked).not.toBeNull()
+      const { i, j } = picked!
+      const start = { x: i + 0.5, y: 0.55, z: j + 0.5 }
+      const moved = moveWithGridCollisions(snap, cfg, start, 0.8, 0)
+
+      expect(moved.x).toBeGreaterThan(i + 1.0)
+    }
+    finally {
+      rnd.mockRestore()
+    }
+  })
+
+  it('does not bypass a closed bottom wall when moving diagonally', () => {
+    const cfg = { cellSize: 1, radius: 0.2, height: 1.6, epsilon: 0.001 }
+    const snap = {
+      cols: 2,
+      rows: 2,
+      cellSizePx: 60,
+      exit: null,
+      gold: [],
+      cells: [
+        // (0,0)
+        { i: 0, j: 0, walls: [true, true, true, false] as [boolean, boolean, boolean, boolean] },
+        // (1,0)
+        { i: 1, j: 0, walls: [true, true, false, true] as [boolean, boolean, boolean, boolean] },
+        // (0,1)
+        { i: 0, j: 1, walls: [true, true, true, false] as [boolean, boolean, boolean, boolean] },
+        // (1,1)
+        { i: 1, j: 1, walls: [true, true, false, true] as [boolean, boolean, boolean, boolean] },
+      ],
+    } as any
+
+    const start = { x: 0.5, y: 0.55, z: 0.5 }
+    const moved = moveWithGridCollisions(snap, cfg, start, 0.3, 0.8)
+
+    const maxLocal = cfg.cellSize - cfg.radius - cfg.epsilon
+    const maxZ = 0 * cfg.cellSize + maxLocal
+    expect(moved.z).toBeLessThanOrEqual(maxZ + 1e-6)
+  })
+
+  it('keeps player within world bounds on huge deltas', () => {
+    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.42)
+    try {
+      setup()
+      const snap = getMazeSnapshot()
+      const cfg = { cellSize: 1, radius: 0.2, height: 1.6, epsilon: 0.001 }
+      const start = { x: 0.5, y: 0.55, z: 0.5 }
+
+      const moved = moveWithGridCollisions(snap, cfg, start, 999, 999)
+      const maxX = snap.cols * cfg.cellSize
+      const maxZ = snap.rows * cfg.cellSize
+      expect(moved.x).toBeGreaterThanOrEqual(cfg.radius + cfg.epsilon)
+      expect(moved.z).toBeGreaterThanOrEqual(cfg.radius + cfg.epsilon)
+      expect(moved.x).toBeLessThanOrEqual(maxX - cfg.radius - cfg.epsilon + 1e-6)
+      expect(moved.z).toBeLessThanOrEqual(maxZ - cfg.radius - cfg.epsilon + 1e-6)
+    }
+    finally {
+      rnd.mockRestore()
+    }
+  })
 })
