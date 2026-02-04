@@ -63,11 +63,51 @@ const is3D = computed(() => viewMode.value === '3d')
 function toggleViewMode() {
   viewMode.value = is3D.value ? '2d' : '3d'
 }
+
+const fsTarget = ref<HTMLElement | null>(null)
+const isFullscreen = ref(false)
+
+function syncFullscreen() {
+  isFullscreen.value = !!document.fullscreenElement
+}
+
+async function toggleFullscreen() {
+  const el = fsTarget.value
+  if (!el)
+    return
+
+  try {
+    if (!document.fullscreenElement) {
+      const anyEl = el as any
+      await (anyEl.requestFullscreen?.() ?? anyEl.webkitRequestFullscreen?.())
+    }
+    else {
+      const anyDoc = document as any
+      await (document.exitFullscreen?.() ?? anyDoc.webkitExitFullscreen?.())
+    }
+  }
+  catch {}
+
+  requestAnimationFrame(() => {
+    window.dispatchEvent(new Event('resize'))
+  })
+}
+
+onMounted(() => {
+  syncFullscreen()
+  document.addEventListener('fullscreenchange', syncFullscreen)
+  document.addEventListener('webkitfullscreenchange', syncFullscreen as any)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('fullscreenchange', syncFullscreen)
+  document.removeEventListener('webkitfullscreenchange', syncFullscreen as any)
+})
 </script>
 
 <template>
   <div class="app-shell">
-    <main class="app-card">
+    <main ref="fsTarget" class="app-card" :class="{ fullscreen: isFullscreen }">
       <header class="app-header">
         <div class="header-left">
           <div class="level-badge">
@@ -86,6 +126,9 @@ function toggleViewMode() {
           <button class="mode-button" type="button" :title="is3D ? '切换到2D' : '切换到3D'" @click="toggleViewMode">
             <div :class="is3D ? 'i-carbon-grid' : 'i-carbon-cube'" class="mr1" />
             <span>{{ is3D ? '2D' : '3D' }}</span>
+          </button>
+          <button class="icon-button" :title="isFullscreen ? '退出全屏' : '全屏模式'" @click="toggleFullscreen">
+            <div :class="isFullscreen ? 'i-carbon-minimize' : 'i-carbon-fit-to-screen'" />
           </button>
           <button class="icon-button" :title="soundEnabled ? '关闭声音' : '开启声音'" @click="toggleSound">
             <div :class="soundEnabled ? 'i-carbon-volume-up' : 'i-carbon-volume-mute'" />
@@ -145,6 +188,9 @@ function toggleViewMode() {
               <b>3D模式：</b>点击画面进入第一人称（锁定鼠标），WASD移动，Shift冲刺，Q/E顺滑转角，Esc退出
             </p>
             <p class="mb2">
+              <b>全屏模式：</b>点击右上角全屏按钮，可更沉浸地游玩（建议搭配3D模式）
+            </p>
+            <p class="mb2">
               <b>道具说明：</b>
             </p>
             <div class="flex items-center my1">
@@ -198,6 +244,50 @@ function toggleViewMode() {
   background: rgba(0, 0, 0, 0.28);
   backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.app-card.fullscreen,
+:global(.app-card:fullscreen) {
+  max-width: none;
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+  border: none;
+}
+
+.app-card.fullscreen .game-footer,
+:global(.app-card:fullscreen) .game-footer {
+  display: none;
+}
+
+.app-card.fullscreen .game-info,
+:global(.app-card:fullscreen) .game-info {
+  display: none;
+}
+
+.app-card.fullscreen .game-content,
+:global(.app-card:fullscreen) .game-content {
+  padding-bottom: 0;
+}
+
+.app-card.fullscreen .game-board,
+:global(.app-card:fullscreen) .game-board {
+  padding: 0;
+  align-items: stretch;
+}
+
+.app-card.fullscreen :deep(.flee3d),
+:global(.app-card:fullscreen) :deep(.flee3d) {
+  height: 100%;
+}
+
+.app-card.fullscreen :deep(.three-root),
+:global(.app-card:fullscreen) :deep(.three-root) {
+  max-width: none;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  border-radius: 0;
 }
 
 .app-header {
