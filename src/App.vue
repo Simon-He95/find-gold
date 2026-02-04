@@ -196,6 +196,9 @@ onBeforeUnmount(() => {
               <b>全屏模式：</b>点击右上角全屏按钮，可更沉浸地游玩（建议搭配3D模式）
             </p>
             <p class="mb2">
+              <b>上帝视角：</b>3D模式下可按 M 切换；也可在底部“第一人称/上帝视角”按钮切换
+            </p>
+            <p class="mb2">
               <b>道具说明：</b>
             </p>
             <div class="flex items-center my1">

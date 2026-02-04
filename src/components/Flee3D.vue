@@ -137,7 +137,7 @@ function onKeyDown(e: KeyboardEvent) {
     e.preventDefault()
 
   if (e.code === 'KeyM') {
-    toggleGodView()
+    godView.value = !godView.value
     return
   }
 
@@ -603,12 +603,6 @@ function animate() {
   renderer.render(scene, camera)
 }
 
-function toggleGodView() {
-  godView.value = !godView.value
-  if (godView.value)
-    requestAnimationFrame(() => renderMinimap())
-}
-
 function renderMinimap() {
   const canvas = minimapEl.value
   if (!canvas)
@@ -772,22 +766,14 @@ const exitHint = computed(() => {
         <div class="pill wide">
           <span class="label">{{ exitHint }}</span>
         </div>
-        <button class="pill pill-btn" type="button" :title="godView ? '关闭上帝视角 (M)' : '开启上帝视角 (M)'" @click.stop="toggleGodView">
-          <span class="label">{{ godView ? '上帝视角：开' : '上帝视角：关' }}</span>
-        </button>
       </div>
 
       <div class="crosshair" />
 
-      <button class="cheat-fab" type="button" :title="godView ? '关闭上帝视角 (M)' : '开启上帝视角 (M)'" @click.stop="toggleGodView">
-        <div i-carbon-map />
-        <span>作弊</span>
-      </button>
-
       <div v-if="godView" class="minimap">
         <canvas ref="minimapEl" width="220" height="220" />
         <div class="minimap-hint">
-          M / 点击关闭
+          M 切换
         </div>
       </div>
 
@@ -869,50 +855,9 @@ const exitHint = computed(() => {
   padding-right: 14px;
 }
 
-.pill-btn {
-  cursor: pointer;
-}
-
-.pill-btn:hover {
-  border-color: rgba(255, 255, 255, 0.16);
-}
-
-.cheat-fab {
-  position: absolute;
-  left: 12px;
-  bottom: 12px;
-  z-index: 7;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 38px;
-  padding: 0 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(10px);
-  color: rgba(255, 255, 255, 0.92);
-  cursor: pointer;
-}
-
-.cheat-fab:hover {
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.cheat-fab > div {
-  width: 18px;
-  height: 18px;
-  opacity: 0.9;
-}
-
-.cheat-fab > span {
-  font-weight: 800;
-  font-size: 0.9rem;
-}
-
 .minimap {
   position: absolute;
-  left: 12px;
+  right: 12px;
   bottom: 12px;
   z-index: 6;
   width: 220px;
