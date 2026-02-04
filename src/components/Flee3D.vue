@@ -78,6 +78,15 @@ let flashlight: THREE.SpotLight | null = null
 let flashlightTarget: THREE.Object3D | null = null
 let baseAmbient: THREE.AmbientLight | null = null
 
+interface MaterialTextureSet {
+  map: THREE.Texture
+  normalMap: THREE.DataTexture
+  roughnessMap: THREE.DataTexture
+}
+
+let wallTextures: MaterialTextureSet | null = null
+let floorTextures: MaterialTextureSet | null = null
+
 const keys = new Set<string>()
 let yaw = 0
 let pitch = 0
@@ -120,6 +129,243 @@ function bump() {
   setTimeout(() => {
     bumping.value = false
   }, 140)
+}
+
+function makeRng(seed: number) {
+  let s = (seed >>> 0) || 1
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0
+    return s / 0x100000000
+  }
+}
+
+function clamp01(v: number) {
+  return Math.max(0, Math.min(1, v))
+}
+
+function heightToNormalMap(
+  height: Float32Array,
+  width: number,
+  heightPx: number,
+  strength: number,
+) {
+  const data = new Uint8Array(width * heightPx * 3)
+  const idx = (x: number, y: number) => x + y * width
+
+  for (let y = 0; y < heightPx; y++) {
+    const y0 = Math.max(0, y - 1)
+    const y1 = Math.min(heightPx - 1, y + 1)
+    for (let x = 0; x < width; x++) {
+      const x0 = Math.max(0, x - 1)
+      const x1 = Math.min(width - 1, x + 1)
+      const hL = height[idx(x0, y)]
+      const hR = height[idx(x1, y)]
+      const hU = height[idx(x, y0)]
+      const hD = height[idx(x, y1)]
+
+      const dx = (hR - hL) * strength
+      const dy = (hD - hU) * strength
+
+      // normal = normalize([-dx, -dy, 1])
+      let nx = -dx
+      let ny = -dy
+      let nz = 1
+      const len = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1
+      nx /= len
+      ny /= len
+      nz /= len
+
+      const o = (x + y * width) * 3
+      data[o + 0] = Math.round((nx * 0.5 + 0.5) * 255)
+      data[o + 1] = Math.round((ny * 0.5 + 0.5) * 255)
+      data[o + 2] = Math.round((nz * 0.5 + 0.5) * 255)
+    }
+  }
+
+  const tex = new THREE.DataTexture(data, width, heightPx, THREE.RGBFormat)
+  tex.wrapS = THREE.RepeatWrapping
+  tex.wrapT = THREE.RepeatWrapping
+  tex.needsUpdate = true
+  tex.colorSpace = THREE.NoColorSpace
+  return tex
+}
+
+function makeRoughnessMap(height: Float32Array, width: number, heightPx: number) {
+  const data = new Uint8Array(width * heightPx)
+  for (let i = 0; i < data.length; i++) {
+    // invert a bit: recesses tend to be rougher
+    const v = clamp01(0.35 + (1 - height[i]) * 0.55)
+    data[i] = Math.round(v * 255)
+  }
+  const tex = new THREE.DataTexture(data, width, heightPx, THREE.RedFormat)
+  tex.wrapS = THREE.RepeatWrapping
+  tex.wrapT = THREE.RepeatWrapping
+  tex.needsUpdate = true
+  tex.colorSpace = THREE.NoColorSpace
+  return tex
+}
+
+function makeCanvasAlbedo(kind: 'wall' | 'floor', size = 512, seed = 1) {
+  const rng = makeRng(seed)
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')!
+
+  if (kind === 'wall') {
+    // stone/brick-ish base
+    ctx.fillStyle = '#E8E3DA'
+    ctx.fillRect(0, 0, size, size)
+
+    const brickH = Math.floor(size / 10)
+    const brickW = Math.floor(size / 6)
+    const mortar = Math.max(2, Math.floor(size / 128))
+
+    for (let y = 0; y < size + brickH; y += brickH) {
+      const offset = ((y / brickH) % 2) ? Math.floor(brickW * 0.5) : 0
+      for (let x = -brickW; x < size + brickW; x += brickW) {
+        const bx = x + offset
+        const by = y
+        const hue = 20 + rng() * 20
+        const sat = 10 + rng() * 18
+        const lit = 62 + rng() * 12
+        ctx.fillStyle = `hsl(${hue} ${sat}% ${lit}%)`
+        ctx.fillRect(bx + mortar, by + mortar, brickW - mortar * 2, brickH - mortar * 2)
+      }
+    }
+
+    // grime / stains
+    ctx.globalAlpha = 0.08
+    for (let i = 0; i < 1200; i++) {
+      const x = rng() * size
+      const y = rng() * size
+      const r = 2 + rng() * 10
+      const g = Math.floor(12 + rng() * 20)
+      ctx.fillStyle = `rgba(0,0,0,${g / 255})`
+      ctx.beginPath()
+      ctx.arc(x, y, r, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    ctx.globalAlpha = 1
+
+    // subtle vertical variation
+    const grad = ctx.createLinearGradient(0, 0, 0, size)
+    grad.addColorStop(0, 'rgba(255,255,255,0.10)')
+    grad.addColorStop(1, 'rgba(0,0,0,0.14)')
+    ctx.fillStyle = grad
+    ctx.fillRect(0, 0, size, size)
+  }
+  else {
+    // floor: concrete + speckles + faint tiles
+    ctx.fillStyle = '#0B1220'
+    ctx.fillRect(0, 0, size, size)
+
+    const tile = Math.floor(size / 8)
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)'
+    ctx.lineWidth = 1
+    for (let y = 0; y <= size; y += tile) {
+      ctx.beginPath()
+      ctx.moveTo(0, y + 0.5)
+      ctx.lineTo(size, y + 0.5)
+      ctx.stroke()
+    }
+    for (let x = 0; x <= size; x += tile) {
+      ctx.beginPath()
+      ctx.moveTo(x + 0.5, 0)
+      ctx.lineTo(x + 0.5, size)
+      ctx.stroke()
+    }
+
+    ctx.globalAlpha = 0.35
+    for (let i = 0; i < 4200; i++) {
+      const x = rng() * size
+      const y = rng() * size
+      const r = rng() < 0.75 ? 0.6 : 1.6
+      const c = 40 + rng() * 40
+      ctx.fillStyle = `rgba(255,255,255,${c / 255})`
+      ctx.beginPath()
+      ctx.arc(x, y, r, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    ctx.globalAlpha = 1
+
+    const grad = ctx.createRadialGradient(size * 0.5, size * 0.45, 0, size * 0.5, size * 0.45, size * 0.75)
+    grad.addColorStop(0, 'rgba(255,255,255,0.06)')
+    grad.addColorStop(1, 'rgba(0,0,0,0.22)')
+    ctx.fillStyle = grad
+    ctx.fillRect(0, 0, size, size)
+  }
+
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.wrapS = THREE.RepeatWrapping
+  tex.wrapT = THREE.RepeatWrapping
+  tex.anisotropy = renderer?.capabilities.getMaxAnisotropy?.() ?? 1
+  tex.needsUpdate = true
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
+
+function makeHeightField(kind: 'wall' | 'floor', size = 256, seed = 1) {
+  const rng = makeRng(seed)
+  const h = new Float32Array(size * size)
+
+  if (kind === 'wall') {
+    const brickH = Math.floor(size / 10)
+    const brickW = Math.floor(size / 6)
+    const mortar = Math.max(1, Math.floor(size / 128))
+    for (let y = 0; y < size; y++) {
+      const row = Math.floor(y / brickH)
+      const offset = (row % 2) ? Math.floor(brickW * 0.5) : 0
+      for (let x = 0; x < size; x++) {
+        const lx = (x + offset) % brickW
+        const ly = y % brickH
+        const isMortar = lx < mortar || ly < mortar || lx > brickW - mortar || ly > brickH - mortar
+        const base = isMortar ? 0.15 : 0.6
+        const noise = (rng() - 0.5) * (isMortar ? 0.08 : 0.18)
+        h[x + y * size] = clamp01(base + noise)
+      }
+    }
+  }
+  else {
+    const tile = Math.floor(size / 8)
+    const grout = Math.max(1, Math.floor(size / 180))
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const isGrout = (x % tile) < grout || (y % tile) < grout
+        const base = isGrout ? 0.28 : 0.52
+        const noise = (rng() - 0.5) * 0.18
+        h[x + y * size] = clamp01(base + noise)
+      }
+    }
+  }
+
+  return h
+}
+
+function ensureMaterialTextures() {
+  if (wallTextures && floorTextures)
+    return
+
+  const seedBase = (n.value * 9973) ^ 0xA2C2
+  const wallHeightField = makeHeightField('wall', 256, seedBase + 1)
+  const floorHeightField = makeHeightField('floor', 256, seedBase + 2)
+
+  wallTextures = {
+    map: makeCanvasAlbedo('wall', 512, seedBase + 10),
+    normalMap: heightToNormalMap(wallHeightField, 256, 256, 3.2),
+    roughnessMap: makeRoughnessMap(wallHeightField, 256, 256),
+  }
+
+  floorTextures = {
+    map: makeCanvasAlbedo('floor', 512, seedBase + 20),
+    normalMap: heightToNormalMap(floorHeightField, 256, 256, 4.0),
+    roughnessMap: makeRoughnessMap(floorHeightField, 256, 256),
+  }
+
+  const maxAniso = renderer?.capabilities.getMaxAnisotropy?.() ?? 1
+  for (const t of [wallTextures.map, floorTextures.map]) {
+    t.anisotropy = maxAniso
+  }
 }
 
 function requestLock() {
@@ -355,13 +601,28 @@ function start3DLevel() {
   exitMarkerMesh = null
   playerMarkerMesh = null
 
+  ensureMaterialTextures()
+
   // floor
   const floorGeo = new THREE.PlaneGeometry(snap.cols * cellSize, snap.rows * cellSize, 1, 1)
   const floorMat = new THREE.MeshStandardMaterial({
-    color: 0x0B1220,
-    roughness: 1,
+    color: 0xFFFFFF,
+    roughness: 0.92,
     metalness: 0,
+    map: floorTextures?.map ?? null,
+    normalMap: floorTextures?.normalMap ?? null,
+    roughnessMap: floorTextures?.roughnessMap ?? null,
   })
+  if (floorMat.map) {
+    floorMat.map.repeat.set(Math.max(1, snap.cols / 2.2), Math.max(1, snap.rows / 2.2))
+    floorMat.map.needsUpdate = true
+  }
+  if (floorMat.normalMap) {
+    floorMat.normalMap.repeat.copy(floorMat.map?.repeat ?? new THREE.Vector2(1, 1))
+    floorMat.normalScale = new THREE.Vector2(0.55, 0.55)
+  }
+  if (floorMat.roughnessMap)
+    floorMat.roughnessMap.repeat.copy(floorMat.map?.repeat ?? new THREE.Vector2(1, 1))
   const floor = new THREE.Mesh(floorGeo, floorMat)
   floor.rotation.x = -Math.PI / 2
   floor.position.set(snap.cols * cellSize / 2, 0, snap.rows * cellSize / 2)
@@ -378,13 +639,26 @@ function start3DLevel() {
   mazeGroup.add(grid)
 
   // walls
-  const wallColor = new THREE.Color().setHSL(Math.random(), 0.7, 0.55)
+  const wallColor = new THREE.Color().setHSL(Math.random(), 0.16, 0.56)
   const wallMat = new THREE.MeshStandardMaterial({
     color: wallColor,
-    roughness: 0.55,
-    metalness: 0.05,
+    roughness: 0.78,
+    metalness: 0.02,
     emissive: new THREE.Color(0x000000),
+    map: wallTextures?.map ?? null,
+    normalMap: wallTextures?.normalMap ?? null,
+    roughnessMap: wallTextures?.roughnessMap ?? null,
   })
+  if (wallMat.map) {
+    wallMat.map.repeat.set(1, Math.max(1, wallHeight * 0.9))
+    wallMat.map.needsUpdate = true
+  }
+  if (wallMat.normalMap) {
+    wallMat.normalMap.repeat.copy(wallMat.map?.repeat ?? new THREE.Vector2(1, 1))
+    wallMat.normalScale = new THREE.Vector2(0.55, 0.55)
+  }
+  if (wallMat.roughnessMap)
+    wallMat.roughnessMap.repeat.copy(wallMat.map?.repeat ?? new THREE.Vector2(1, 1))
   const wallEdgeMat = new THREE.LineBasicMaterial({ color: 0x111827, transparent: true, opacity: 0.35 })
 
   const hGeo = new THREE.BoxGeometry(cellSize, wallHeight, wallThickness)
@@ -557,6 +831,10 @@ function initThree() {
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1))
   renderer.setSize(w, h, false)
   renderer.setClearColor(0x050814, 1)
+  renderer.outputColorSpace = THREE.SRGBColorSpace
+  renderer.toneMapping = THREE.ACESFilmicToneMapping
+  renderer.toneMappingExposure = 1.08
+  ;(renderer as any).physicallyCorrectLights = true
   renderer.shadowMap.enabled = false
   renderer.domElement.style.position = 'absolute'
   renderer.domElement.style.inset = '0'
@@ -585,9 +863,16 @@ function initThree() {
   baseAmbient = new THREE.AmbientLight(0x1F2937, 0.55)
   scene.add(baseAmbient)
 
+  const hemi = new THREE.HemisphereLight(0x93C5FD, 0x0B1220, 0.55)
+  scene.add(hemi)
+
   const dir = new THREE.DirectionalLight(0xFFFFFF, 0.5)
-  dir.position.set(6, 8, 5)
+  dir.position.set(6, 9, 5)
   scene.add(dir)
+
+  const dir2 = new THREE.DirectionalLight(0xFFE6C7, 0.25)
+  dir2.position.set(-5, 6, -7)
+  scene.add(dir2)
 
   start3DLevel()
 }
@@ -791,6 +1076,16 @@ onBeforeUnmount(() => {
 
   if (scene)
     disposeObject(scene)
+
+  wallTextures?.map.dispose()
+  wallTextures?.normalMap.dispose()
+  wallTextures?.roughnessMap.dispose()
+  wallTextures = null
+
+  floorTextures?.map.dispose()
+  floorTextures?.normalMap.dispose()
+  floorTextures?.roughnessMap.dispose()
+  floorTextures = null
 
   if (renderer) {
     renderer.dispose()
