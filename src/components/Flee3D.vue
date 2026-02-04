@@ -13,6 +13,7 @@ import {
 } from '../canvas'
 import { manhattanCellDistance, moveWithGridCollisions } from '../maze/collision'
 import { computeGodOrthoFrustum } from '../maze/godview'
+import { nearestGoldDistance } from '../maze/hints'
 import { cellFromWorld, collectAtCell, collectedGold, shouldAdvanceLevel, shouldUnlockExit, stepCounter } from '../maze/step'
 
 const props = defineProps({
@@ -1109,6 +1110,15 @@ const exitHint = computed(() => {
   const dist = manhattanCellDistance(cell, snap.exit)
   return exitUnlocked.value ? `出口约 ${dist} 步` : `出口未开启（剩余 ${remainingGold.value}）`
 })
+
+const nearestGoldHint = computed(() => {
+  const snap = getMazeSnapshot()
+  const cell = currentCell()
+  const d = nearestGoldDistance(snap.gold as any, cell as any)
+  if (d === null)
+    return '金币已收集完'
+  return `最近金币约 ${d} 步`
+})
 </script>
 
 <template>
@@ -1131,6 +1141,9 @@ const exitHint = computed(() => {
         <div class="pill">
           <span class="label">时间</span>
           <span class="value">{{ countDown }}s</span>
+        </div>
+        <div class="pill wide">
+          <span class="label">{{ nearestGoldHint }}</span>
         </div>
         <div class="pill wide">
           <span class="label">{{ exitHint }}</span>
