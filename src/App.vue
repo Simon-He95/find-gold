@@ -68,7 +68,7 @@ const fsTarget = ref<HTMLElement | null>(null)
 const isFullscreen = ref(false)
 
 function syncFullscreen() {
-  isFullscreen.value = !!document.fullscreenElement
+  isFullscreen.value = document.fullscreenElement === fsTarget.value
 }
 
 async function toggleFullscreen() {
@@ -107,7 +107,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="app-shell">
-    <main ref="fsTarget" class="app-card" :class="{ fullscreen: isFullscreen }">
+    <main class="app-card">
       <header class="app-header">
         <div class="header-left">
           <div class="level-badge">
@@ -153,8 +153,13 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="game-content">
-        <Flee v-if="!is3D" :sound-enabled="soundEnabled" class="game-board" />
-        <Flee3D v-else :sound-enabled="soundEnabled" class="game-board" />
+        <div ref="fsTarget" class="game-stage">
+          <button v-if="isFullscreen" class="fs-fab" type="button" title="退出全屏 (Esc)" @click.stop="toggleFullscreen">
+            <div i-carbon-close />
+          </button>
+          <Flee v-if="!is3D" :sound-enabled="soundEnabled" class="game-board" />
+          <Flee3D v-else :sound-enabled="soundEnabled" class="game-board" />
+        </div>
 
         <div class="game-info">
           <vivid-typing
@@ -246,50 +251,6 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.app-card.fullscreen,
-:global(.app-card:fullscreen) {
-  max-width: none;
-  width: 100vw;
-  height: 100vh;
-  border-radius: 0;
-  border: none;
-}
-
-.app-card.fullscreen .game-footer,
-:global(.app-card:fullscreen) .game-footer {
-  display: none;
-}
-
-.app-card.fullscreen .game-info,
-:global(.app-card:fullscreen) .game-info {
-  display: none;
-}
-
-.app-card.fullscreen .game-content,
-:global(.app-card:fullscreen) .game-content {
-  padding-bottom: 0;
-}
-
-.app-card.fullscreen .game-board,
-:global(.app-card:fullscreen) .game-board {
-  padding: 0;
-  align-items: stretch;
-}
-
-.app-card.fullscreen :deep(.flee3d),
-:global(.app-card:fullscreen) :deep(.flee3d) {
-  height: 100%;
-}
-
-.app-card.fullscreen :deep(.three-root),
-:global(.app-card:fullscreen) :deep(.three-root) {
-  max-width: none;
-  width: 100%;
-  height: 100%;
-  aspect-ratio: auto;
-  border-radius: 0;
-}
-
 .app-header {
   display: flex;
   justify-content: space-between;
@@ -353,6 +314,75 @@ onBeforeUnmount(() => {
   flex-direction: column;
   align-items: center;
   padding-bottom: 10px;
+}
+
+.game-stage {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  position: relative;
+}
+
+:global(.game-stage:fullscreen) {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 40% 30%, rgba(15, 23, 42, 0.65), rgba(0, 0, 0, 0.85));
+}
+
+:global(.game-stage:fullscreen) .game-board {
+  padding: 0;
+  align-items: stretch;
+  height: 100%;
+}
+
+:global(.game-stage:fullscreen) :deep(.flee3d) {
+  height: 100%;
+}
+
+:global(.game-stage:fullscreen) :deep(.three-root) {
+  max-width: none;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  border-radius: 0;
+}
+
+:global(.game-stage:fullscreen) :deep(.three-root canvas) {
+  width: 100%;
+  height: 100%;
+}
+
+:global(.game-stage:fullscreen) :deep(.game-board-container canvas) {
+  width: min(100vw, 100vh);
+  height: min(100vw, 100vh);
+}
+
+.fs-fab {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 20;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(10px);
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+}
+
+.fs-fab:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.fs-fab > div {
+  width: 18px;
+  height: 18px;
+  margin: 0 auto;
 }
 
 .game-board {
