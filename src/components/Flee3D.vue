@@ -12,6 +12,7 @@ import {
   win,
 } from '../canvas'
 import { manhattanCellDistance, moveWithGridCollisions } from '../maze/collision'
+import { computeGodOrthoFrustum } from '../maze/godview'
 import { cellFromWorld, collectAtCell, collectedGold, shouldAdvanceLevel, shouldUnlockExit, stepCounter } from '../maze/step'
 
 const props = defineProps({
@@ -43,7 +44,7 @@ const showWin = ref(false)
 const winText = ref('')
 
 const godView = useStorage<boolean>('FIND_GOLD_god_view', false)
-const minimapEl = ref<HTMLCanvasElement | null>(null)
+const godZoom = useStorage<number>('FIND_GOLD_god_zoom', 1)
 
 const cellSize = 1
 const wallThickness = 0.1
@@ -58,24 +59,29 @@ const cfg = {
 
 let renderer: THREE.WebGLRenderer | null = null
 let scene: THREE.Scene | null = null
-let camera: THREE.PerspectiveCamera | null = null
+let baseFog: THREE.FogExp2 | null = null
+let camera: THREE.Camera | null = null
+let fpsCamera: THREE.PerspectiveCamera | null = null
+let godCamera: THREE.OrthographicCamera | null = null
 let raf = 0
 let clock: THREE.Clock | null = null
 
 let mazeGroup: THREE.Group | null = null
 
 let exitMesh: THREE.Mesh | null = null
+let exitMarkerMesh: THREE.Mesh | null = null
 let goldMeshes: THREE.Mesh[] = []
+let playerMarkerMesh: THREE.Mesh | null = null
 
 let flashlight: THREE.SpotLight | null = null
 let flashlightTarget: THREE.Object3D | null = null
+let baseAmbient: THREE.AmbientLight | null = null
 
 const keys = new Set<string>()
 let yaw = 0
 let pitch = 0
 let yawTarget = 0
 let pitchTarget = 0
-let minimapTick = 0
 
 const player = reactive({ x: 0.5, y: 0.55, z: 0.5 })
 let lastCell = { i: 0, j: 0 }
@@ -118,10 +124,17 @@ function bump() {
 function requestLock() {
   if (!rootEl.value)
     return
+  if (godView.value)
+    return
   rootEl.value.requestPointerLock?.()
 }
 
 function onPointerLockChange() {
+  if (godView.value) {
+    locked.value = false
+    paused.value = false
+    return
+  }
   const el = document.pointerLockElement
   locked.value = !!el
   paused.value = !locked.value
@@ -167,15 +180,29 @@ function onMouseMove(e: MouseEvent) {
 }
 
 function setCameraPose() {
-  if (!camera)
+  if (godView.value) {
+    if (!godCamera)
+      return
+    const snap = getMazeSnapshot()
+    const centerX = snap.cols * 0.5
+    const centerZ = snap.rows * 0.5
+    const height = Math.max(snap.cols, snap.rows) * 1.35 + wallHeight * 2
+    godCamera.position.set(centerX, height, centerZ)
+    godCamera.up.set(0, 0, -1)
+    godCamera.lookAt(new THREE.Vector3(centerX, 0, centerZ))
+    godCamera.updateMatrixWorld()
+    return
+  }
+
+  if (!fpsCamera)
     return
   yaw += (yawTarget - yaw) * 0.18
   pitch += (pitchTarget - pitch) * 0.18
-  camera.rotation.set(pitch, yaw, 0, 'YXZ')
-  camera.position.set(player.x, player.y, player.z)
+  fpsCamera.rotation.set(pitch, yaw, 0, 'YXZ')
+  fpsCamera.position.set(player.x, player.y, player.z)
   if (flashlight) {
-    flashlight.position.copy(camera.position)
-    const dir = new THREE.Vector3(0, 0, -1).applyEuler(camera.rotation)
+    flashlight.position.copy(fpsCamera.position)
+    const dir = new THREE.Vector3(0, 0, -1).applyEuler(fpsCamera.rotation)
     if (flashlightTarget) {
       flashlightTarget.position.set(player.x + dir.x, player.y + dir.y, player.z + dir.z)
       flashlightTarget.updateMatrixWorld()
@@ -282,6 +309,25 @@ function syncExitMaterial() {
     mat.transparent = true
   }
   mat.needsUpdate = true
+
+  if (exitMarkerMesh) {
+    const markerMat = exitMarkerMesh.material as THREE.MeshStandardMaterial
+    if (exitUnlocked.value) {
+      markerMat.color.setHex(0x22C55E)
+      markerMat.emissive.setHex(0x14532D)
+      markerMat.emissiveIntensity = 1.6
+      markerMat.opacity = 0.92
+      markerMat.transparent = true
+    }
+    else {
+      markerMat.color.setHex(0x64748B)
+      markerMat.emissive.setHex(0x000000)
+      markerMat.emissiveIntensity = 0
+      markerMat.opacity = 0.45
+      markerMat.transparent = true
+    }
+    markerMat.needsUpdate = true
+  }
 }
 
 function start3DLevel() {
@@ -294,7 +340,6 @@ function start3DLevel() {
   pitch = 0
   yawTarget = 0
   pitchTarget = 0
-  minimapTick = 0
 
   if (!scene || !mazeGroup)
     return
@@ -306,6 +351,8 @@ function start3DLevel() {
   }
   goldMeshes = []
   exitMesh = null
+  exitMarkerMesh = null
+  playerMarkerMesh = null
 
   // floor
   const floorGeo = new THREE.PlaneGeometry(snap.cols * cellSize, snap.rows * cellSize, 1, 1)
@@ -417,6 +464,24 @@ function start3DLevel() {
     portal.position.set(snap.exit.i * cellSize + 0.5, 0.5, snap.exit.j * cellSize + 0.5)
     mazeGroup.add(portal)
     exitMesh = portal
+
+    const markerGeo = new THREE.CircleGeometry(0.36, 32)
+    const markerMat = new THREE.MeshStandardMaterial({
+      color: 0x64748B,
+      emissive: new THREE.Color(0x000000),
+      emissiveIntensity: 0,
+      transparent: true,
+      opacity: 0.45,
+      roughness: 0.9,
+      metalness: 0,
+      depthWrite: false,
+    })
+    const marker = new THREE.Mesh(markerGeo, markerMat)
+    marker.rotation.x = -Math.PI / 2
+    marker.position.set(snap.exit.i * cellSize + 0.5, 0.012, snap.exit.j * cellSize + 0.5)
+    marker.visible = godView.value
+    mazeGroup.add(marker)
+    exitMarkerMesh = marker
     syncExitMaterial()
   }
 
@@ -425,12 +490,27 @@ function start3DLevel() {
   const coinMat = new THREE.MeshStandardMaterial({ color: 0xFBBF24, roughness: 0.25, metalness: 0.8, emissive: new THREE.Color(0x3D2A00), emissiveIntensity: 0.25 })
   for (const g of snap.gold) {
     const coin = new THREE.Mesh(coinGeo, coinMat)
-    coin.position.set(g.i * cellSize + 0.5, 0.18, g.j * cellSize + 0.5)
-    coin.rotation.x = Math.PI / 2
+    coin.position.set(g.i * cellSize + 0.5, godView.value ? 0.06 : 0.18, g.j * cellSize + 0.5)
+    coin.rotation.x = godView.value ? 0 : Math.PI / 2
     coin.visible = g.show
     mazeGroup.add(coin)
     goldMeshes.push(coin)
   }
+
+  // player marker (god view)
+  const markerGeo = new THREE.SphereGeometry(0.12, 14, 10)
+  const markerMat = new THREE.MeshStandardMaterial({
+    color: 0x38BDF8,
+    emissive: new THREE.Color(0x0EA5E9),
+    emissiveIntensity: 0.45,
+    roughness: 0.35,
+    metalness: 0.05,
+  })
+  const marker = new THREE.Mesh(markerGeo, markerMat)
+  marker.position.set(player.x, 0.16, player.z)
+  marker.visible = godView.value
+  mazeGroup.add(marker)
+  playerMarkerMesh = marker
 
   // bounds hint (visual polish)
   const border = new THREE.Box3Helper(
@@ -454,16 +534,22 @@ function initThree() {
 
   scene = new THREE.Scene()
   scene.background = new THREE.Color(0x050814)
-  scene.fog = new THREE.FogExp2(0x050814, 0.12)
+  baseFog = new THREE.FogExp2(0x050814, 0.12)
+  scene.fog = baseFog
 
   mazeGroup = new THREE.Group()
   scene.add(mazeGroup)
 
   const w = rootEl.value.clientWidth
   const h = rootEl.value.clientHeight
-  camera = new THREE.PerspectiveCamera(72, w / h, 0.01, 60)
-  camera.position.set(player.x, player.y, player.z)
-  camera.rotation.order = 'YXZ'
+  fpsCamera = new THREE.PerspectiveCamera(72, w / h, 0.01, 60)
+  fpsCamera.position.set(player.x, player.y, player.z)
+  fpsCamera.rotation.order = 'YXZ'
+
+  const snap = getMazeSnapshot()
+  const { left, right, top, bottom } = computeGodOrthoFrustum(snap.cols, snap.rows, w / h, godZoom.value)
+  godCamera = new THREE.OrthographicCamera(left, right, top, bottom, 0.01, 200)
+  camera = godView.value ? godCamera : fpsCamera
 
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1))
@@ -487,8 +573,8 @@ function initThree() {
   scene.add(new THREE.AmbientLight(0x0B1220, 0.3))
 
   // base lighting
-  const ambient = new THREE.AmbientLight(0x1F2937, 0.55)
-  scene.add(ambient)
+  baseAmbient = new THREE.AmbientLight(0x1F2937, 0.55)
+  scene.add(baseAmbient)
 
   const dir = new THREE.DirectionalLight(0xFFFFFF, 0.5)
   dir.position.set(6, 8, 5)
@@ -496,6 +582,43 @@ function initThree() {
 
   start3DLevel()
 }
+
+watch(godView, (v) => {
+  if (v) {
+    document.exitPointerLock?.()
+    locked.value = false
+    paused.value = false
+  }
+  else {
+    paused.value = !locked.value
+  }
+
+  if (scene)
+    scene.fog = v ? null : baseFog
+  if (flashlight)
+    flashlight.visible = !v
+  if (baseAmbient)
+    baseAmbient.intensity = v ? 0.9 : 0.55
+  if (exitMarkerMesh)
+    exitMarkerMesh.visible = v
+  if (playerMarkerMesh)
+    playerMarkerMesh.visible = v
+  for (const m of goldMeshes) {
+    m.rotation.x = v ? 0 : Math.PI / 2
+    m.position.y = v ? 0.06 : 0.18
+    m.scale.setScalar(v ? 1.1 : 1)
+  }
+
+  camera = v ? godCamera : fpsCamera
+  requestAnimationFrame(resize)
+  requestAnimationFrame(setCameraPose)
+}, { immediate: true })
+
+watch(godZoom, () => {
+  if (!godCamera)
+    return
+  resize()
+})
 
 function disposeObject(obj: THREE.Object3D) {
   obj.traverse((child) => {
@@ -519,8 +642,20 @@ function resize() {
   const w = rootEl.value.clientWidth
   const h = rootEl.value.clientHeight
   renderer.setSize(w, h)
-  camera.aspect = w / h
-  camera.updateProjectionMatrix()
+  const aspect = w / h
+  if (fpsCamera) {
+    fpsCamera.aspect = aspect
+    fpsCamera.updateProjectionMatrix()
+  }
+  if (godCamera) {
+    const snap = getMazeSnapshot()
+    const { left, right, top, bottom } = computeGodOrthoFrustum(snap.cols, snap.rows, aspect, godZoom.value)
+    godCamera.left = left
+    godCamera.right = right
+    godCamera.top = top
+    godCamera.bottom = bottom
+    godCamera.updateProjectionMatrix()
+  }
 }
 
 function animate() {
@@ -529,17 +664,15 @@ function animate() {
     return
 
   const dt = Math.min(0.04, clock.getDelta())
-  if (godView.value) {
-    minimapTick += dt
-    if (minimapTick > 0.12) {
-      minimapTick = 0
-      renderMinimap()
-    }
-  }
 
-  if (!paused.value && locked.value && !isInputLocked()) {
-    const forward = new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(0, yaw, 0, 'YXZ'))
-    const right = new THREE.Vector3(1, 0, 0).applyEuler(new THREE.Euler(0, yaw, 0, 'YXZ'))
+  const canMove = !paused.value && !isInputLocked() && (locked.value || godView.value)
+  if (canMove) {
+    const forward = godView.value
+      ? new THREE.Vector3(0, 0, -1)
+      : new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(0, yaw, 0, 'YXZ'))
+    const right = godView.value
+      ? new THREE.Vector3(1, 0, 0)
+      : new THREE.Vector3(1, 0, 0).applyEuler(new THREE.Euler(0, yaw, 0, 'YXZ'))
 
     const move = new THREE.Vector3(0, 0, 0)
     const sprint = keys.has('ShiftLeft')
@@ -564,7 +697,7 @@ function animate() {
 
       // head bob + footsteps
       const t = clock.elapsedTime
-      player.y = 0.55 + Math.sin(t * 10) * 0.015
+      player.y = 0.55 + (godView.value ? 0 : Math.sin(t * 10) * 0.015)
       if (blocked)
         bump()
 
@@ -582,9 +715,11 @@ function animate() {
 
     collectIfNeeded()
 
-    // sprint FOV kick
-    camera.fov += ((sprint ? 78 : 72) - camera.fov) * 0.12
-    camera.updateProjectionMatrix()
+    // sprint FOV kick (fps only)
+    if (fpsCamera && !godView.value) {
+      fpsCamera.fov += ((sprint ? 78 : 72) - fpsCamera.fov) * 0.12
+      fpsCamera.updateProjectionMatrix()
+    }
   }
 
   // animate coins + exit pulse
@@ -592,104 +727,20 @@ function animate() {
     if (!m.visible)
       continue
     m.rotation.z += dt * 2.8
-    m.position.y = 0.18 + Math.sin((clock.elapsedTime * 3) + m.position.x + m.position.z) * 0.02
+    if (!godView.value)
+      m.position.y = 0.18 + Math.sin((clock.elapsedTime * 3) + m.position.x + m.position.z) * 0.02
   }
   if (exitMesh && exitUnlocked.value) {
     const mat = exitMesh.material as THREE.MeshStandardMaterial
     mat.emissiveIntensity = 0.9 + Math.sin(clock.elapsedTime * 3.2) * 0.35
   }
+  if (playerMarkerMesh) {
+    playerMarkerMesh.position.x = player.x
+    playerMarkerMesh.position.z = player.z
+  }
 
   setCameraPose()
   renderer.render(scene, camera)
-}
-
-function renderMinimap() {
-  const canvas = minimapEl.value
-  if (!canvas)
-    return
-  const ctx = canvas.getContext('2d')
-  if (!ctx)
-    return
-
-  const snap = getMazeSnapshot()
-  const w = canvas.width
-  const h = canvas.height
-  ctx.clearRect(0, 0, w, h)
-
-  const pad = 10
-  const size = Math.min(w, h) - pad * 2
-  const cell = size / Math.max(snap.cols, snap.rows)
-  const ox = (w - cell * snap.cols) / 2
-  const oy = (h - cell * snap.rows) / 2
-
-  ctx.fillStyle = 'rgba(0,0,0,0.35)'
-  ctx.fillRect(0, 0, w, h)
-  ctx.fillStyle = 'rgba(15, 23, 42, 0.8)'
-  ctx.fillRect(ox - 6, oy - 6, cell * snap.cols + 12, cell * snap.rows + 12)
-
-  // walls
-  ctx.strokeStyle = 'rgba(226, 232, 240, 0.65)'
-  ctx.lineWidth = Math.max(1, Math.floor(cell / 10))
-  ctx.beginPath()
-  for (const c of snap.cells) {
-    const x = ox + c.i * cell
-    const y = oy + c.j * cell
-    if (c.walls[0]) { // top
-      ctx.moveTo(x, y)
-      ctx.lineTo(x + cell, y)
-    }
-    if (c.walls[2]) { // left
-      ctx.moveTo(x, y)
-      ctx.lineTo(x, y + cell)
-    }
-    if (c.j === snap.rows - 1 && c.walls[1]) { // bottom border
-      ctx.moveTo(x, y + cell)
-      ctx.lineTo(x + cell, y + cell)
-    }
-    if (c.i === snap.cols - 1 && c.walls[3]) { // right border
-      ctx.moveTo(x + cell, y)
-      ctx.lineTo(x + cell, y + cell)
-    }
-  }
-  ctx.stroke()
-
-  // exit
-  if (snap.exit) {
-    const ex = ox + (snap.exit.i + 0.5) * cell
-    const ey = oy + (snap.exit.j + 0.5) * cell
-    ctx.fillStyle = exitUnlocked.value ? 'rgba(34,197,94,0.95)' : 'rgba(148,163,184,0.9)'
-    ctx.beginPath()
-    ctx.rect(ex - cell * 0.18, ey - cell * 0.18, cell * 0.36, cell * 0.36)
-    ctx.fill()
-  }
-
-  // gold (remaining bright, collected dim)
-  for (const g of goldArray.value as any[]) {
-    const gx = ox + (g.i + 0.5) * cell
-    const gy = oy + (g.j + 0.5) * cell
-    ctx.fillStyle = g.show ? 'rgba(251,191,36,0.95)' : 'rgba(251,191,36,0.18)'
-    ctx.beginPath()
-    ctx.arc(gx, gy, Math.max(2, cell * (g.show ? 0.12 : 0.08)), 0, Math.PI * 2)
-    ctx.fill()
-  }
-
-  // player (dot + facing)
-  const p = cellFromWorld(player.x, player.z, 1, snap.cols, snap.rows)
-  const px = ox + (p.i + 0.5) * cell
-  const py = oy + (p.j + 0.5) * cell
-  ctx.fillStyle = 'rgba(96,165,250,0.95)'
-  ctx.beginPath()
-  ctx.arc(px, py, Math.max(2.5, cell * 0.14), 0, Math.PI * 2)
-  ctx.fill()
-
-  const dir = -yaw
-  const len = Math.max(6, cell * 0.35)
-  ctx.strokeStyle = 'rgba(147, 197, 253, 0.95)'
-  ctx.lineWidth = Math.max(1, Math.floor(cell / 9))
-  ctx.beginPath()
-  ctx.moveTo(px, py)
-  ctx.lineTo(px + Math.cos(dir) * len, py + Math.sin(dir) * len)
-  ctx.stroke()
 }
 
 onMounted(() => {
@@ -725,6 +776,7 @@ onBeforeUnmount(() => {
   }
   renderer = null
   scene = null
+  baseFog = null
   camera = null
   clock = null
   mazeGroup = null
@@ -768,16 +820,9 @@ const exitHint = computed(() => {
         </div>
       </div>
 
-      <div class="crosshair" />
+      <div v-if="!godView" class="crosshair" />
 
-      <div v-if="godView" class="minimap">
-        <canvas ref="minimapEl" width="220" height="220" />
-        <div class="minimap-hint">
-          M 切换
-        </div>
-      </div>
-
-      <div v-if="paused" class="overlay">
+      <div v-if="paused && !godView" class="overlay">
         <div class="card">
           <div class="title">
             3D 第一人称模式
@@ -786,7 +831,7 @@ const exitHint = computed(() => {
             点击画面进入（锁定鼠标）<br>
             移动：WASD  冲刺：Shift<br>
             转角：Q / E（顺滑转身）<br>
-            小地图：M（上帝视角）<br>
+            上帝视角：M（或底部按钮）<br>
             退出：Esc
           </div>
           <button class="btn" type="button">
@@ -851,42 +896,9 @@ const exitHint = computed(() => {
   color: rgba(255, 255, 255, 0.92);
 }
 
-.pill.wide {
-  padding-right: 14px;
-}
-
-.minimap {
-  position: absolute;
-  right: 12px;
-  bottom: 12px;
-  z-index: 6;
-  width: 220px;
-  height: 220px;
-  border-radius: 14px;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
-  background: rgba(0, 0, 0, 0.25);
-}
-
-.minimap canvas {
-  width: 220px;
-  height: 220px;
-  display: block;
-}
-
-.minimap-hint {
-  position: absolute;
-  left: 10px;
-  bottom: 10px;
-  font-size: 12px;
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.45);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(8px);
-}
+  .pill.wide {
+    padding-right: 14px;
+  }
 
 .label {
   font-size: 0.85rem;
