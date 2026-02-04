@@ -65,6 +65,7 @@ let fpsCamera: THREE.PerspectiveCamera | null = null
 let godCamera: THREE.OrthographicCamera | null = null
 let raf = 0
 let clock: THREE.Clock | null = null
+let resizeObserver: ResizeObserver | null = null
 
 let mazeGroup: THREE.Group | null = null
 
@@ -540,8 +541,9 @@ function initThree() {
   mazeGroup = new THREE.Group()
   scene.add(mazeGroup)
 
-  const w = rootEl.value.clientWidth
-  const h = rootEl.value.clientHeight
+  const rect = rootEl.value.getBoundingClientRect()
+  const w = Math.max(1, Math.floor(rect.width))
+  const h = Math.max(1, Math.floor(rect.height))
   fpsCamera = new THREE.PerspectiveCamera(72, w / h, 0.01, 60)
   fpsCamera.position.set(player.x, player.y, player.z)
   fpsCamera.rotation.order = 'YXZ'
@@ -551,10 +553,17 @@ function initThree() {
   godCamera = new THREE.OrthographicCamera(left, right, top, bottom, 0.01, 200)
   camera = godView.value ? godCamera : fpsCamera
 
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+  renderer = new THREE.WebGLRenderer({ antialias: true })
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1))
-  renderer.setSize(w, h)
+  renderer.setSize(w, h, false)
+  renderer.setClearColor(0x050814, 1)
   renderer.shadowMap.enabled = false
+  renderer.domElement.style.position = 'absolute'
+  renderer.domElement.style.inset = '0'
+  renderer.domElement.style.width = '100%'
+  renderer.domElement.style.height = '100%'
+  renderer.domElement.style.display = 'block'
+  renderer.domElement.style.zIndex = '0'
   rootEl.value.appendChild(renderer.domElement)
   requestAnimationFrame(resize)
 
@@ -583,16 +592,7 @@ function initThree() {
   start3DLevel()
 }
 
-watch(godView, (v) => {
-  if (v) {
-    document.exitPointerLock?.()
-    locked.value = false
-    paused.value = false
-  }
-  else {
-    paused.value = !locked.value
-  }
-
+function applyViewState(v: boolean) {
   if (scene)
     scene.fog = v ? null : baseFog
   if (flashlight)
@@ -609,7 +609,21 @@ watch(godView, (v) => {
     m.scale.setScalar(v ? 1.1 : 1)
   }
 
-  camera = v ? godCamera : fpsCamera
+  if (godCamera && fpsCamera)
+    camera = v ? godCamera : fpsCamera
+}
+
+watch(godView, (v) => {
+  if (v) {
+    document.exitPointerLock?.()
+    locked.value = false
+    paused.value = false
+  }
+  else {
+    paused.value = !locked.value
+  }
+
+  applyViewState(v)
   requestAnimationFrame(resize)
   requestAnimationFrame(setCameraPose)
 }, { immediate: true })
@@ -637,11 +651,12 @@ function disposeObject(obj: THREE.Object3D) {
 }
 
 function resize() {
-  if (!rootEl.value || !renderer || !camera)
+  if (!rootEl.value || !renderer)
     return
-  const w = rootEl.value.clientWidth
-  const h = rootEl.value.clientHeight
-  renderer.setSize(w, h)
+  const rect = rootEl.value.getBoundingClientRect()
+  const w = Math.max(1, Math.floor(rect.width))
+  const h = Math.max(1, Math.floor(rect.height))
+  renderer.setSize(w, h, false)
   const aspect = w / h
   if (fpsCamera) {
     fpsCamera.aspect = aspect
@@ -749,6 +764,11 @@ onMounted(() => {
     setup()
 
   initThree()
+  applyViewState(godView.value)
+
+  resizeObserver = new ResizeObserver(() => resize())
+  if (rootEl.value)
+    resizeObserver.observe(rootEl.value)
 
   window.addEventListener('resize', resize)
   document.addEventListener('pointerlockchange', onPointerLockChange)
@@ -761,6 +781,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   cancelAnimationFrame(raf)
+  resizeObserver?.disconnect()
+  resizeObserver = null
   window.removeEventListener('resize', resize)
   document.removeEventListener('pointerlockchange', onPointerLockChange)
   window.removeEventListener('keydown', onKeyDown)
