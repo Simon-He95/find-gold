@@ -15,6 +15,7 @@ import { manhattanCellDistance, moveWithGridCollisions } from '../maze/collision
 import { computeGodOrthoFrustum } from '../maze/godview'
 import { nearestGoldDistance } from '../maze/hints'
 import { cellFromWorld, collectAtCell, collectedGold, shouldAdvanceLevel, shouldUnlockExit, stepCounter } from '../maze/step'
+import { createTorchRig } from '../three/torch'
 
 const props = defineProps({
   soundEnabled: {
@@ -28,6 +29,8 @@ const locked = ref(false)
 const paused = ref(true)
 const steps = ref(0)
 const bumping = ref(false)
+const debugTorch = ref(false)
+const debugTorchText = ref('')
 
 interface LevelRecord {
   time: number
@@ -60,15 +63,19 @@ const cfg = {
 
 let renderer: THREE.WebGLRenderer | null = null
 let scene: THREE.Scene | null = null
-let baseFog: THREE.FogExp2 | null = null
 let camera: THREE.Camera | null = null
 let fpsCamera: THREE.PerspectiveCamera | null = null
 let godCamera: THREE.OrthographicCamera | null = null
 let raf = 0
 let clock: THREE.Clock | null = null
 let resizeObserver: ResizeObserver | null = null
+const fpsExposure = 1.2
+const godExposure = 1.08
 
 let mazeGroup: THREE.Group | null = null
+let gridHelper: THREE.GridHelper | null = null
+let borderHelper: THREE.Box3Helper | null = null
+let mazeWallLines: THREE.LineSegments | null = null
 
 let exitMesh: THREE.Mesh | null = null
 let exitMarkerMesh: THREE.Mesh | null = null
@@ -76,8 +83,20 @@ let goldMeshes: THREE.Mesh[] = []
 let playerMarkerMesh: THREE.Mesh | null = null
 
 let flashlight: THREE.SpotLight | null = null
+let flashlightFill: THREE.SpotLight | null = null
+let flashlightBounce: THREE.PointLight | null = null
+let flashlightBeam: THREE.Mesh | null = null
+let flashlightBeamEnabled = false
 let flashlightTarget: THREE.Object3D | null = null
+let flashlightCookie: THREE.Texture | null = null
+let torchSpot: THREE.Sprite | null = null
+let torchSpotTexture: THREE.Texture | null = null
+let torchIntensityScale = 1
 let baseAmbient: THREE.AmbientLight | null = null
+let fillAmbient: THREE.AmbientLight | null = null
+let hemiLight: THREE.HemisphereLight | null = null
+let dirLight: THREE.DirectionalLight | null = null
+let dirLight2: THREE.DirectionalLight | null = null
 
 interface MaterialTextureSet {
   map: THREE.Texture
@@ -97,6 +116,23 @@ let pitchTarget = 0
 const player = reactive({ x: 0.5, y: 0.55, z: 0.5 })
 let lastCell = { i: 0, j: 0 }
 let stepSoundCooldown = 0
+const debugRaycaster = new THREE.Raycaster()
+const debugNdc = new THREE.Vector2(0, 0)
+const debugV0 = new THREE.Vector3()
+const debugV1 = new THREE.Vector3()
+const torchOrigin = new THREE.Vector3()
+const torchForward = new THREE.Vector3()
+const torchAimWorld = new THREE.Vector3()
+const torchAimNdc = new THREE.Vector3()
+const meshHitsOnly = (hits: THREE.Intersection[]) =>
+  hits.filter(h => (h.object as any)?.isMesh)
+
+const torchTest = ref(false)
+const torchAimScreen = reactive({ x: 0, y: 0 })
+const torchAimStyle = computed(() => ({
+  left: `${torchAimScreen.x}px`,
+  top: `${torchAimScreen.y}px`,
+}))
 
 const audioWalk = document.createElement('audio')
 audioWalk.src = '/bgm/walk.mp3'
@@ -235,6 +271,24 @@ function makeCanvasAlbedo(kind: 'wall' | 'floor', size = 512, seed = 1) {
       }
     }
 
+    // accentuate mortar so brick pattern reads under low light
+    ctx.globalAlpha = 0.22
+    ctx.strokeStyle = 'rgba(0,0,0,0.55)'
+    ctx.lineWidth = Math.max(1, Math.floor(size / 220))
+    for (let y = 0; y <= size; y += brickH) {
+      ctx.beginPath()
+      ctx.moveTo(0, y + 0.5)
+      ctx.lineTo(size, y + 0.5)
+      ctx.stroke()
+    }
+    for (let x = 0; x <= size; x += brickW) {
+      ctx.beginPath()
+      ctx.moveTo(x + 0.5, 0)
+      ctx.lineTo(x + 0.5, size)
+      ctx.stroke()
+    }
+    ctx.globalAlpha = 1
+
     // grime / stains
     ctx.globalAlpha = 0.08
     for (let i = 0; i < 1200; i++) {
@@ -258,11 +312,11 @@ function makeCanvasAlbedo(kind: 'wall' | 'floor', size = 512, seed = 1) {
   }
   else {
     // floor: concrete + speckles + faint tiles
-    ctx.fillStyle = '#0B1220'
+    ctx.fillStyle = '#374151'
     ctx.fillRect(0, 0, size, size)
 
     const tile = Math.floor(size / 8)
-    ctx.strokeStyle = 'rgba(255,255,255,0.06)'
+    ctx.strokeStyle = 'rgba(255,255,255,0.10)'
     ctx.lineWidth = 1
     for (let y = 0; y <= size; y += tile) {
       ctx.beginPath()
@@ -277,7 +331,7 @@ function makeCanvasAlbedo(kind: 'wall' | 'floor', size = 512, seed = 1) {
       ctx.stroke()
     }
 
-    ctx.globalAlpha = 0.35
+    ctx.globalAlpha = 0.55
     for (let i = 0; i < 4200; i++) {
       const x = rng() * size
       const y = rng() * size
@@ -301,6 +355,28 @@ function makeCanvasAlbedo(kind: 'wall' | 'floor', size = 512, seed = 1) {
   tex.wrapS = THREE.RepeatWrapping
   tex.wrapT = THREE.RepeatWrapping
   tex.anisotropy = renderer?.capabilities.getMaxAnisotropy?.() ?? 1
+  tex.needsUpdate = true
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
+
+function makeTorchSpotTexture(size = 256) {
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+  if (!ctx)
+    return null
+
+  const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2)
+  grad.addColorStop(0, 'rgba(255,255,255,0.95)')
+  grad.addColorStop(0.4, 'rgba(255,244,214,0.7)')
+  grad.addColorStop(0.7, 'rgba(255,244,214,0.25)')
+  grad.addColorStop(1, 'rgba(255,244,214,0)')
+  ctx.fillStyle = grad
+  ctx.fillRect(0, 0, size, size)
+
+  const tex = new THREE.CanvasTexture(canvas)
   tex.needsUpdate = true
   tex.colorSpace = THREE.SRGBColorSpace
   return tex
@@ -394,8 +470,13 @@ function onKeyDown(e: KeyboardEvent) {
   if (isInputLocked())
     return
 
-  if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'KeyM', 'ShiftLeft', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code))
+  if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'KeyM', 'ShiftLeft', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Backquote'].includes(e.code))
     e.preventDefault()
+
+  if (e.code === 'Backquote' && import.meta.env.DEV) {
+    debugTorch.value = !debugTorch.value
+    return
+  }
 
   if (e.code === 'KeyM') {
     godView.value = !godView.value
@@ -448,14 +529,7 @@ function setCameraPose() {
   pitch += (pitchTarget - pitch) * 0.18
   fpsCamera.rotation.set(pitch, yaw, 0, 'YXZ')
   fpsCamera.position.set(player.x, player.y, player.z)
-  if (flashlight) {
-    flashlight.position.copy(fpsCamera.position)
-    const dir = new THREE.Vector3(0, 0, -1).applyEuler(fpsCamera.rotation)
-    if (flashlightTarget) {
-      flashlightTarget.position.set(player.x + dir.x, player.y + dir.y, player.z + dir.z)
-      flashlightTarget.updateMatrixWorld()
-    }
-  }
+  fpsCamera.updateMatrixWorld()
 }
 
 function currentCell() {
@@ -584,10 +658,12 @@ function start3DLevel() {
   player.z = 0.5
   player.y = 0.55
   lastCell = { i: 0, j: 0 }
-  yaw = 0
-  pitch = 0
-  yawTarget = 0
-  pitchTarget = 0
+  // Face into the maze. At the start cell (z≈0.5), looking -Z points outside bounds.
+  yaw = Math.PI
+  // Slightly down so floor + grid are visible immediately.
+  pitch = -0.12
+  yawTarget = yaw
+  pitchTarget = pitch
 
   if (!scene || !mazeGroup)
     return
@@ -601,6 +677,9 @@ function start3DLevel() {
   exitMesh = null
   exitMarkerMesh = null
   playerMarkerMesh = null
+  gridHelper = null
+  borderHelper = null
+  mazeWallLines = null
 
   ensureMaterialTextures()
 
@@ -610,6 +689,8 @@ function start3DLevel() {
     color: 0xFFFFFF,
     roughness: 0.92,
     metalness: 0,
+    emissive: new THREE.Color(0x0B1220),
+    emissiveIntensity: 0.12,
     map: floorTextures?.map ?? null,
     normalMap: floorTextures?.normalMap ?? null,
     roughnessMap: floorTextures?.roughnessMap ?? null,
@@ -620,7 +701,7 @@ function start3DLevel() {
   }
   if (floorMat.normalMap) {
     floorMat.normalMap.repeat.copy(floorMat.map?.repeat ?? new THREE.Vector2(1, 1))
-    floorMat.normalScale = new THREE.Vector2(0.55, 0.55)
+    floorMat.normalScale = new THREE.Vector2(0.8, 0.8)
   }
   if (floorMat.roughnessMap)
     floorMat.roughnessMap.repeat.copy(floorMat.map?.repeat ?? new THREE.Vector2(1, 1))
@@ -630,22 +711,72 @@ function start3DLevel() {
   floor.receiveShadow = true
   mazeGroup.add(floor)
 
-  const grid = new THREE.GridHelper(Math.max(snap.cols, snap.rows) * cellSize, Math.max(snap.cols, snap.rows), 0x334155, 0x111827)
-  grid.position.set(snap.cols * cellSize / 2, 0.001, snap.rows * cellSize / 2)
+  const grid = new THREE.GridHelper(
+    Math.max(snap.cols, snap.rows) * cellSize,
+    Math.max(snap.cols, snap.rows),
+    0x94A3B8,
+    0x334155,
+  )
+  grid.position.set(snap.cols * cellSize / 2, 0.01, snap.rows * cellSize / 2)
   const gridMaterials = Array.isArray(grid.material) ? grid.material : [grid.material]
   for (const m of gridMaterials) {
-    m.opacity = 0.25
+    // Keep the grid subtle in god view; walls are drawn separately for clarity.
+    m.opacity = 0.14
     m.transparent = true
+    ;(m as any).depthWrite = false
+    ;(m as any).depthTest = true
   }
+  grid.visible = godView.value
   mazeGroup.add(grid)
+  gridHelper = grid
+
+  // god view wall outlines (only closed walls)
+  {
+    const y = 0.022
+    const positions: number[] = []
+    const pushSeg = (x0: number, z0: number, x1: number, z1: number) => {
+      positions.push(x0, y, z0, x1, y, z1)
+    }
+
+    for (const c of snap.cells) {
+      const x0 = c.i * cellSize
+      const z0 = c.j * cellSize
+
+      if (c.walls[0])
+        pushSeg(x0, z0, x0 + cellSize, z0)
+      if (c.walls[2])
+        pushSeg(x0, z0, x0, z0 + cellSize)
+      if (c.j === snap.rows - 1 && c.walls[1])
+        pushSeg(x0, z0 + cellSize, x0 + cellSize, z0 + cellSize)
+      if (c.i === snap.cols - 1 && c.walls[3])
+        pushSeg(x0 + cellSize, z0, x0 + cellSize, z0 + cellSize)
+    }
+
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+    const mat = new THREE.LineBasicMaterial({
+      color: 0xE2E8F0,
+      transparent: true,
+      opacity: 0.62,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      depthTest: false,
+    })
+    const lines = new THREE.LineSegments(geo, mat)
+    lines.renderOrder = 10
+    lines.visible = godView.value
+    mazeGroup.add(lines)
+    mazeWallLines = lines
+  }
 
   // walls
-  const wallColor = new THREE.Color().setHSL(Math.random(), 0.16, 0.56)
+  const wallColor = new THREE.Color().setHSL(Math.random(), 0.10, 0.76)
   const wallMat = new THREE.MeshStandardMaterial({
     color: wallColor,
     roughness: 0.78,
     metalness: 0.02,
-    emissive: new THREE.Color(0x000000),
+    emissive: new THREE.Color(0x0B1220),
+    emissiveIntensity: 0.08,
     map: wallTextures?.map ?? null,
     normalMap: wallTextures?.normalMap ?? null,
     roughnessMap: wallTextures?.roughnessMap ?? null,
@@ -656,11 +787,18 @@ function start3DLevel() {
   }
   if (wallMat.normalMap) {
     wallMat.normalMap.repeat.copy(wallMat.map?.repeat ?? new THREE.Vector2(1, 1))
-    wallMat.normalScale = new THREE.Vector2(0.55, 0.55)
+    wallMat.normalScale = new THREE.Vector2(0.8, 0.8)
   }
   if (wallMat.roughnessMap)
     wallMat.roughnessMap.repeat.copy(wallMat.map?.repeat ?? new THREE.Vector2(1, 1))
-  const wallEdgeMat = new THREE.LineBasicMaterial({ color: 0x111827, transparent: true, opacity: 0.35 })
+  const wallEdgeMat = new THREE.LineBasicMaterial({ color: 0xCBD5E1, transparent: true, opacity: 0.22 })
+
+  // NOTE: Horizontal/vertical wall boxes can create coplanar overlaps at corners.
+  // Use polygon offset on one set to avoid z-fighting "mosaic" artifacts.
+  const wallMatV = wallMat.clone()
+  wallMatV.polygonOffset = true
+  wallMatV.polygonOffsetFactor = 1
+  wallMatV.polygonOffsetUnits = 1
 
   const hGeo = new THREE.BoxGeometry(cellSize, wallHeight, wallThickness)
   const vGeo = new THREE.BoxGeometry(wallThickness, wallHeight, cellSize)
@@ -680,7 +818,7 @@ function start3DLevel() {
   }
 
   const hMesh = new THREE.InstancedMesh(hGeo, wallMat, Math.max(1, hCount))
-  const vMesh = new THREE.InstancedMesh(vGeo, wallMat, Math.max(1, vCount))
+  const vMesh = new THREE.InstancedMesh(vGeo, wallMatV, Math.max(1, vCount))
   hMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
   vMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
 
@@ -802,6 +940,8 @@ function start3DLevel() {
     m.opacity = 0.12
   }
   mazeGroup.add(border)
+  border.visible = godView.value
+  borderHelper = border
 }
 
 function initThree() {
@@ -810,8 +950,9 @@ function initThree() {
 
   scene = new THREE.Scene()
   scene.background = new THREE.Color(0x050814)
-  baseFog = new THREE.FogExp2(0x050814, 0.12)
-  scene.fog = baseFog
+  // Fog tends to "overwrite" the torch beam and make the center look black at distance.
+  // Keep it off in FPS mode and rely on the torch falloff for darkness.
+  scene.fog = null
 
   mazeGroup = new THREE.Group()
   scene.add(mazeGroup)
@@ -822,6 +963,8 @@ function initThree() {
   fpsCamera = new THREE.PerspectiveCamera(72, w / h, 0.01, 60)
   fpsCamera.position.set(player.x, player.y, player.z)
   fpsCamera.rotation.order = 'YXZ'
+  // Add the FPS camera to the scene so children (flashlight/target) get matrixWorld updates.
+  scene.add(fpsCamera)
 
   const snap = getMazeSnapshot()
   const { left, right, top, bottom } = computeGodOrthoFrustum(snap.cols, snap.rows, w / h, godZoom.value)
@@ -834,7 +977,7 @@ function initThree() {
   renderer.setClearColor(0x050814, 1)
   renderer.outputColorSpace = THREE.SRGBColorSpace
   renderer.toneMapping = THREE.ACESFilmicToneMapping
-  renderer.toneMappingExposure = 1.08
+  renderer.toneMappingExposure = fpsExposure
   ;(renderer as any).physicallyCorrectLights = true
   renderer.shadowMap.enabled = false
   renderer.domElement.style.position = 'absolute'
@@ -849,46 +992,101 @@ function initThree() {
   clock = new THREE.Clock()
 
   // flashlight
-  flashlight = new THREE.SpotLight(0xFFFFFF, 3.2, 10, Math.PI / 6, 0.35, 1)
-  flashlight.position.set(player.x, player.y, player.z)
-  flashlightTarget = new THREE.Object3D()
-  flashlightTarget.position.set(player.x, player.y, player.z - 1)
-  scene.add(flashlightTarget)
-  flashlight.target = flashlightTarget
-  scene.add(flashlight)
+  // Attach to the FPS camera so it always follows mouse look (yaw + pitch).
+  // Use a 2-light rig to simulate a torch/flashlight: sharp bright center + soft wide falloff,
+  // plus a small bounce point light so walls nearby never look "unlit".
+  const torch = createTorchRig(fpsCamera)
+  flashlight = torch.main
+  flashlightFill = torch.fill
+  flashlightBounce = torch.bounce
+  flashlightBeam = torch.beam
+  flashlightBeamEnabled = false
+  if (flashlightBeam)
+    flashlightBeam.visible = false
+  flashlightTarget = torch.target
+  flashlightCookie = torch.cookie
+  torchIntensityScale = 1
+  if (flashlight)
+    flashlight.userData.baseIntensity = flashlight.intensity
+  if (flashlightFill)
+    flashlightFill.userData.baseIntensity = flashlightFill.intensity
+  if (flashlightBounce)
+    flashlightBounce.userData.baseIntensity = flashlightBounce.intensity
+
+  // visible hotspot (fake decal) to ensure the wall shows the torch center
+  torchSpotTexture = makeTorchSpotTexture(256)
+  if (torchSpotTexture) {
+    const spotMat = new THREE.SpriteMaterial({
+      map: torchSpotTexture,
+      color: 0xFFF2CC,
+      transparent: true,
+      opacity: 0.28,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    })
+    torchSpot = new THREE.Sprite(spotMat)
+    torchSpot.visible = false
+    torchSpot.renderOrder = 3
+    scene.add(torchSpot)
+  }
 
   // small ambient to avoid pure black
-  scene.add(new THREE.AmbientLight(0x0B1220, 0.3))
+  fillAmbient = new THREE.AmbientLight(0x0B1220, 0.3)
+  scene.add(fillAmbient)
 
   // base lighting
   baseAmbient = new THREE.AmbientLight(0x1F2937, 0.55)
   scene.add(baseAmbient)
 
-  const hemi = new THREE.HemisphereLight(0x93C5FD, 0x0B1220, 0.55)
-  scene.add(hemi)
+  hemiLight = new THREE.HemisphereLight(0x93C5FD, 0x0B1220, 0.55)
+  scene.add(hemiLight)
 
-  const dir = new THREE.DirectionalLight(0xFFFFFF, 0.5)
-  dir.position.set(6, 9, 5)
-  scene.add(dir)
+  dirLight = new THREE.DirectionalLight(0xFFFFFF, 0.5)
+  dirLight.position.set(6, 9, 5)
+  scene.add(dirLight)
 
-  const dir2 = new THREE.DirectionalLight(0xFFE6C7, 0.25)
-  dir2.position.set(-5, 6, -7)
-  scene.add(dir2)
+  dirLight2 = new THREE.DirectionalLight(0xFFE6C7, 0.25)
+  dirLight2.position.set(-5, 6, -7)
+  scene.add(dirLight2)
 
   start3DLevel()
 }
 
 function applyViewState(v: boolean) {
   if (scene)
-    scene.fog = v ? null : baseFog
+    scene.fog = null
+  if (renderer)
+    renderer.toneMappingExposure = v ? godExposure : fpsExposure
   if (flashlight)
     flashlight.visible = !v
+  if (flashlightFill)
+    flashlightFill.visible = !v
+  if (flashlightBounce)
+    flashlightBounce.visible = !v
+  if (flashlightBeam)
+    flashlightBeam.visible = flashlightBeamEnabled && !v
+  if (torchSpot)
+    torchSpot.visible = !v
   if (baseAmbient)
-    baseAmbient.intensity = v ? 0.9 : 0.55
+    baseAmbient.intensity = v ? 0.9 : 0.26
+  if (fillAmbient)
+    fillAmbient.intensity = v ? 0.3 : 0.12
+  if (hemiLight)
+    hemiLight.intensity = v ? 0.55 : 0.18
+  if (dirLight)
+    dirLight.intensity = v ? 0.5 : 0
+  if (dirLight2)
+    dirLight2.intensity = v ? 0.25 : 0
   if (exitMarkerMesh)
     exitMarkerMesh.visible = v
   if (playerMarkerMesh)
     playerMarkerMesh.visible = v
+  if (gridHelper)
+    gridHelper.visible = v
+  if (borderHelper)
+    borderHelper.visible = v
+  if (mazeWallLines)
+    mazeWallLines.visible = v
   for (const m of goldMeshes) {
     m.rotation.x = v ? 0 : Math.PI / 2
     m.position.y = v ? 0.06 : 0.18
@@ -956,6 +1154,101 @@ function resize() {
     godCamera.top = top
     godCamera.bottom = bottom
     godCamera.updateProjectionMatrix()
+  }
+}
+
+function updateTorchAim() {
+  if (!fpsCamera || !flashlightTarget)
+    return
+  if (godView.value)
+    return
+
+  fpsCamera.updateMatrixWorld()
+  const aimDistance = 20
+  torchForward.set(0, 0, -1).applyQuaternion(fpsCamera.quaternion)
+  torchAimWorld.copy(fpsCamera.position).addScaledVector(torchForward, aimDistance)
+
+  flashlightTarget.position.set(0, 0, -1)
+  flashlightTarget.updateMatrixWorld()
+
+  let hit: THREE.Intersection | null = null
+  if (mazeGroup) {
+    if (flashlight)
+      flashlight.getWorldPosition(torchOrigin)
+    else
+      fpsCamera.getWorldPosition(torchOrigin)
+    debugRaycaster.set(torchOrigin, torchForward)
+    const hits = meshHitsOnly(debugRaycaster.intersectObject(mazeGroup, true))
+    hit = hits[0] ?? null
+  }
+
+  // Auto-scale intensity: dim when very close to a wall (avoid blowout),
+  // boost a bit when looking down a long corridor (avoid "can't see the road").
+  {
+    const d = hit?.distance ?? aimDistance
+    const targetScale = Math.min(1.35, Math.max(0.25, d / 4))
+    torchIntensityScale += (targetScale - torchIntensityScale) * 0.12
+    if (flashlight) {
+      const base = typeof flashlight.userData?.baseIntensity === 'number'
+        ? flashlight.userData.baseIntensity
+        : flashlight.intensity
+      flashlight.intensity = base * torchIntensityScale
+    }
+    if (flashlightFill) {
+      const base = typeof flashlightFill.userData?.baseIntensity === 'number'
+        ? flashlightFill.userData.baseIntensity
+        : flashlightFill.intensity
+      flashlightFill.intensity = base * torchIntensityScale
+    }
+    if (flashlightBounce) {
+      const base = typeof flashlightBounce.userData?.baseIntensity === 'number'
+        ? flashlightBounce.userData.baseIntensity
+        : flashlightBounce.intensity
+      flashlightBounce.intensity = base * torchIntensityScale
+    }
+  }
+
+  if (flashlightBeam && flashlightBeamEnabled) {
+    flashlightBeam.lookAt(torchAimWorld)
+    const baseLength = typeof flashlightBeam.userData?.baseLength === 'number'
+      ? flashlightBeam.userData.baseLength
+      : 10
+    const startZ = typeof flashlightBeam.userData?.startZ === 'number'
+      ? flashlightBeam.userData.startZ
+      : 0
+    if (hit) {
+      const dist = Math.max(0.2, hit.distance - 0.15)
+      const ratio = Math.min(Math.max(dist / baseLength, 0.05), 1)
+      flashlightBeam.scale.setScalar(ratio)
+      // Keep the near end fixed at -startZ (avoid near-plane clipping artifacts).
+      flashlightBeam.position.z = startZ * (ratio - 1)
+    }
+    else {
+      flashlightBeam.scale.setScalar(1)
+      flashlightBeam.position.z = 0
+    }
+  }
+
+  if (torchSpot) {
+    if (hit) {
+      torchSpot.visible = true
+      const normal = hit.face
+        ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld)
+        : torchForward
+      torchSpot.position.copy(hit.point).addScaledVector(normal, 0.02)
+      const size = Math.min(1.55, Math.max(0.32, hit.distance * 0.09))
+      torchSpot.scale.set(size, size, size)
+    }
+    else {
+      torchSpot.visible = false
+    }
+  }
+
+  if (torchTest.value && rootEl.value) {
+    torchAimNdc.copy(torchAimWorld).project(fpsCamera)
+    const rect = rootEl.value.getBoundingClientRect()
+    torchAimScreen.x = (torchAimNdc.x * 0.5 + 0.5) * rect.width
+    torchAimScreen.y = (-torchAimNdc.y * 0.5 + 0.5) * rect.height
   }
 }
 
@@ -1041,6 +1334,24 @@ function animate() {
   }
 
   setCameraPose()
+  updateTorchAim()
+
+  if (import.meta.env.DEV && debugTorch.value && fpsCamera && flashlight) {
+    debugRaycaster.setFromCamera(debugNdc, fpsCamera)
+    const hits = mazeGroup ? meshHitsOnly(debugRaycaster.intersectObject(mazeGroup, true)) : []
+    const hit = hits[0]
+
+    flashlight.getWorldPosition(debugV0)
+    flashlight.target.getWorldPosition(debugV1)
+    debugTorchText.value = [
+      `cam: ${fpsCamera.position.x.toFixed(2)},${fpsCamera.position.y.toFixed(2)},${fpsCamera.position.z.toFixed(2)}`,
+      `yaw/pitch: ${yaw.toFixed(2)} / ${pitch.toFixed(2)}`,
+      `main: I=${flashlight.intensity.toFixed(0)} dist=${flashlight.distance || 0} decay=${flashlight.decay} ang=${(flashlight.angle * 180 / Math.PI).toFixed(1)}° pen=${flashlight.penumbra.toFixed(2)}`,
+      `light->target: ${debugV0.distanceTo(debugV1).toFixed(2)}`,
+      hit ? `hit: ${hit.distance.toFixed(2)} obj=${(hit.object as any).type}` : 'hit: none',
+    ].join('\n')
+  }
+
   renderer.render(scene, camera)
 }
 
@@ -1048,6 +1359,10 @@ onMounted(() => {
   // ensure initial level exists
   if (!goldArray.value.length)
     setup()
+
+  torchTest.value = typeof window !== 'undefined' && window.location.search.includes('torchTest=1')
+  if (torchTest.value)
+    godView.value = false
 
   initThree()
   applyViewState(godView.value)
@@ -1094,12 +1409,38 @@ onBeforeUnmount(() => {
   }
   renderer = null
   scene = null
-  baseFog = null
   camera = null
   clock = null
   mazeGroup = null
+  gridHelper = null
+  borderHelper = null
+  mazeWallLines = null
   flashlight = null
+  flashlightFill = null
+  flashlightBounce = null
+  flashlightBeam = null
+  flashlightBeamEnabled = false
   flashlightTarget = null
+  flashlightCookie?.dispose()
+  flashlightCookie = null
+  if (torchSpot) {
+    const mat = torchSpot.material as THREE.Material | THREE.Material[] | undefined
+    if (Array.isArray(mat)) {
+      for (const m of mat)
+        m.dispose?.()
+    }
+    else {
+      mat?.dispose?.()
+    }
+  }
+  torchSpot = null
+  torchSpotTexture?.dispose()
+  torchSpotTexture = null
+  baseAmbient = null
+  fillAmbient = null
+  hemiLight = null
+  dirLight = null
+  dirLight2 = null
 })
 
 const exitHint = computed(() => {
@@ -1150,7 +1491,9 @@ const nearestGoldHint = computed(() => {
         </div>
       </div>
 
-      <div v-if="!godView" class="crosshair" />
+      <pre v-if="debugTorch && !godView" class="debug-torch">{{ debugTorchText }}</pre>
+      <div v-if="torchTest || !godView" class="crosshair" />
+      <div v-if="torchTest && !godView" class="torch-aim" :style="torchAimStyle" />
 
       <div v-if="paused && !godView" class="overlay">
         <div class="card">
@@ -1264,6 +1607,36 @@ const nearestGoldHint = computed(() => {
   box-shadow: 0 0 16px rgba(255, 255, 255, 0.15);
   z-index: 5;
   pointer-events: none;
+}
+
+.torch-aim {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: rgba(34, 211, 238, 0.85);
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.6);
+  z-index: 6;
+  pointer-events: none;
+}
+
+.debug-torch {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  z-index: 6;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(8px);
+  font-size: 12px;
+  line-height: 1.25;
+  color: rgba(255, 255, 255, 0.9);
+  pointer-events: none;
+  white-space: pre-wrap;
 }
 
 .overlay {

@@ -4,25 +4,44 @@ export const n = ref(1)
 export const hideMask = ref(false)
 useStorage('FIND_GOLD_level', n)
 
-const WIDTH = window.outerWidth > 600 ? 600 : (window.outerWidth - 70)
-const HEIGHT = WIDTH
+function getDevicePixelRatio() {
+  if (typeof window === 'undefined')
+    return 1
+  const v = window.devicePixelRatio || 1
+  if (!Number.isFinite(v))
+    return 1
+  return Math.max(1, Math.min(4, v))
+}
+
+function getInitialBoardSizePx() {
+  if (typeof window === 'undefined')
+    return 600
+  const viewportW = window.innerWidth || window.outerWidth || 600
+  const raw = viewportW > 600 ? 600 : (viewportW - 70)
+  return Math.max(240, Math.floor(raw))
+}
+
+export const boardSizePx = ref(getInitialBoardSizePx())
+const boardPx = computed(() => boardSizePx.value)
+
 export const w = computed(() => {
+  const size = boardPx.value
   // 计算最佳单元格大小以填充画布
-  const minSize = Math.floor(HEIGHT / (3 * n.value)) < 20 ? 20 : Math.floor(HEIGHT / (3 * n.value))
+  const rawMinSize = Math.floor(size / (3 * n.value))
+  const minSize = rawMinSize < 20 ? 20 : rawMinSize
   // 调整单元格大小，确保能够均匀分布（避免边缘黑边）
-  return Math.floor(WIDTH / Math.floor(WIDTH / minSize))
+  const divisor = Math.max(1, Math.floor(size / minSize))
+  return Math.floor(size / divisor)
 })
 const grid: Cell[] = []
 const canvas: HTMLCanvasElement = document.createElement('canvas')
-canvas.setAttribute('style', 'margin: 0 auto;')
+canvas.style.display = 'block'
 let ctx: CanvasRenderingContext2D = makeStubContext(canvas)
-canvas.width = WIDTH
-canvas.height = HEIGHT
 let current: Cell
 // 通过计算得出能够整除画布宽度的列数
-const cols = computed(() => Math.floor(WIDTH / w.value))
+const cols = computed(() => Math.floor(boardPx.value / w.value))
 // 通过计算得出能够整除画布高度的行数
-const rows = computed(() => Math.floor(HEIGHT / w.value))
+const rows = computed(() => Math.floor(boardPx.value / w.value))
 export const imgLeft = ref(0)
 export const imgTop = ref(0)
 export const mazeCols = cols
@@ -183,9 +202,37 @@ function hash2(i: number, j: number) {
   return x / 0xFFFFFFFF
 }
 
+function applyCanvasSizing() {
+  const size = boardSizePx.value
+  const dpr = getDevicePixelRatio()
+  canvas.style.width = `${size}px`
+  canvas.style.height = `${size}px`
+  canvas.width = Math.max(1, Math.round(size * dpr))
+  canvas.height = Math.max(1, Math.round(size * dpr))
+  ctx = safeGet2dContext(canvas)
+  try {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  }
+  catch {}
+}
+
+function applyMaskSizing() {
+  const size = boardSizePx.value
+  const dpr = getDevicePixelRatio()
+  mask.style.width = `${2 * size}px`
+  mask.style.height = `${2 * size}px`
+  mask.width = Math.max(1, Math.round(2 * size * dpr))
+  mask.height = Math.max(1, Math.round(2 * size * dpr))
+  maskCtx = safeGet2dContext(mask)
+  try {
+    maskCtx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  }
+  catch {}
+}
+
 // 优化后的setup函数，增加难度调整
 export function setup() {
-  ctx = safeGet2dContext(canvas)
+  applyCanvasSizing()
   const h = Math.floor(Math.random() * 360)
   const wall = hslToRgb(h, 0.72, 0.55)
   const wallHi = mix(wall, [255, 255, 255], 0.35)
@@ -198,16 +245,17 @@ export function setup() {
   // 基于关卡动态调整视野范围
   rangeScope.value = Math.max(0.6, 1.2 - (n.value * 0.04)) // 随着关卡增加，初始视野会逐渐减小
 
-  ctx.clearRect(0, 0, WIDTH, HEIGHT)
+  const size = boardSizePx.value
+  ctx.clearRect(0, 0, size, size)
   imgLeft.value = 0
   imgTop.value = 0
   win.value = false
   exitUnlocked.value = false
   grid.length = 0
   golds.length = 0
-  ctx.clearRect(0, 0, WIDTH, HEIGHT)
+  ctx.clearRect(0, 0, size, size)
   ctx.fillStyle = '#000'
-  ctx.fillRect(0, 0, WIDTH, HEIGHT)
+  ctx.fillRect(0, 0, size, size)
 
   // 动态调整迷宫大小，随关卡增加（按 row-major: i + j * cols）
   for (let j = 0; j < rows.value; j++) {
@@ -218,10 +266,12 @@ export function setup() {
 
   // 填充底色，确保不留黑边
   ctx.fillStyle = '#000'
-  ctx.fillRect(0, 0, WIDTH, HEIGHT)
+  ctx.fillRect(0, 0, size, size)
 
   current = grid[0]
-  draw()
+  generatePerfectMaze()
+  renderMaze()
+  chooseExit()
   goldArray.value = getGold()
   start.value = Date.now()
   return canvas
@@ -395,19 +445,17 @@ function generatePerfectMaze() {
   }
 }
 
-// 替换原有的draw函数
-function draw() {
-  generatePerfectMaze()
-
+function renderMaze() {
+  const size = boardSizePx.value
   // Base floor (pseudo-3D ambience)
-  ctx.clearRect(0, 0, WIDTH, HEIGHT)
+  ctx.clearRect(0, 0, size, size)
   ctx.fillStyle = 'rgba(6, 8, 12, 1)'
-  ctx.fillRect(0, 0, WIDTH, HEIGHT)
-  const glow = ctx.createRadialGradient(WIDTH * 0.45, HEIGHT * 0.35, 0, WIDTH * 0.45, HEIGHT * 0.35, WIDTH * 0.95)
+  ctx.fillRect(0, 0, size, size)
+  const glow = ctx.createRadialGradient(size * 0.45, size * 0.35, 0, size * 0.45, size * 0.35, size * 0.95)
   glow.addColorStop(0, rgba(theme.value.floorHi, 0.35))
   glow.addColorStop(1, 'rgba(0, 0, 0, 0)')
   ctx.fillStyle = glow
-  ctx.fillRect(0, 0, WIDTH, HEIGHT)
+  ctx.fillRect(0, 0, size, size)
 
   // 绘制迷宫
   for (let i = 0; i < grid.length; i++) {
@@ -417,11 +465,13 @@ function draw() {
   // Outer frame for crisp edges
   ctx.strokeStyle = rgba(theme.value.wallStroke, 0.45)
   ctx.lineWidth = Math.max(2, Math.min(5, Math.floor(w.value / 8)))
-  ctx.strokeRect(1, 1, WIDTH - 2, HEIGHT - 2)
+  ctx.strokeRect(1, 1, size - 2, size - 2)
 
   // 设置起点
   current = grid[0]
+}
 
+function chooseExit() {
   // 选择出口：从起点出发最远的格子（更鼓励探索）
   const startCell = grid[0]
   const farthest = findFarthestCell(startCell)
@@ -569,22 +619,31 @@ export function downMove() {
 let stepClear = 1
 
 export function initMask() {
-  maskCtx = safeGet2dContext(mask)
+  applyMaskSizing()
   maskX = 0
   maskY = 0
   stepClear = 1
-  mask.width = 2 * WIDTH
-  mask.height = 2 * HEIGHT
-  drawCircle(WIDTH + w.value / 2, HEIGHT + w.value / 2, range.value)
-  mask.setAttribute('style', `position:absolute;left:-${WIDTH}px;top:-${HEIGHT}px;z-index:10`)
+  const size = boardSizePx.value
+  drawCircle(size + w.value / 2, size + w.value / 2, range.value)
+  mask.style.position = 'absolute'
+  mask.style.left = `-${size}px`
+  mask.style.top = `-${size}px`
+  mask.style.zIndex = '10'
+  mask.style.transform = ''
 
   return mask
 }
 
 export function updateMask() {
   stepClear = 1
-  drawCircle(WIDTH + w.value / 2, HEIGHT + w.value / 2, range.value)
-  mask.setAttribute('style', `position:absolute;left:-${WIDTH}px;top:-${HEIGHT}px;z-index:10;transform:translate(${maskX}px, ${maskY}px)`)
+  applyMaskSizing()
+  const size = boardSizePx.value
+  drawCircle(size + w.value / 2, size + w.value / 2, range.value)
+  mask.style.position = 'absolute'
+  mask.style.left = `-${size}px`
+  mask.style.top = `-${size}px`
+  mask.style.zIndex = '10'
+  mask.style.transform = `translate(${maskX}px, ${maskY}px)`
 }
 
 function clearArc(x: number, y: number, radius: number) {
@@ -602,10 +661,11 @@ function clearArc(x: number, y: number, radius: number) {
 }
 
 function drawCircle(x: number, y: number, r: number) {
-  maskCtx.clearRect(0, 0, mask.width, mask.height)
+  const size = boardSizePx.value
+  maskCtx.clearRect(0, 0, 2 * size, 2 * size)
   maskCtx.beginPath()
   maskCtx.fillStyle = '#000'
-  maskCtx.fillRect(0, 0, mask.width, mask.height)
+  maskCtx.fillRect(0, 0, 2 * size, 2 * size)
 
   // Create a gradient for the edge of the visibility circle
   const gradient = maskCtx.createRadialGradient(x, y, r * 0.85, x, y, r)
@@ -651,6 +711,76 @@ export function getGold() {
       glowIntensity: 0.5 + Math.random() * 0.5, // Random glow intensity
     }
   })
+}
+
+export function resizeBoard(nextBoardSizePx: number, opts?: { preserve?: boolean }) {
+  const next = Math.max(240, Math.floor(nextBoardSizePx))
+  const prev = boardSizePx.value
+  if (Math.abs(next - prev) < 2)
+    return
+
+  const prevCols = cols.value
+  const prevRows = rows.value
+  const prevW = w.value
+  const prevI = Math.max(0, Math.min(prevCols - 1, Math.round(imgLeft.value / (prevW || 1))))
+  const prevJ = Math.max(0, Math.min(prevRows - 1, Math.round(imgTop.value / (prevW || 1))))
+
+  boardSizePx.value = next
+  applyCanvasSizing()
+
+  const canPreserve = !!opts?.preserve
+    && grid.length > 0
+    && cols.value === prevCols
+    && rows.value === prevRows
+
+  if (!canPreserve) {
+    // Resize changed logical grid; rebuild visuals (keep level n, timer start, etc.)
+    const t = start.value
+    const wasWin = win.value
+    const wasExitUnlocked = exitUnlocked.value
+    setup()
+    initMask()
+    start.value = t
+    win.value = wasWin
+    exitUnlocked.value = wasExitUnlocked
+    return
+  }
+
+  // Preserve logical state: recompute all pixel-space positions.
+  imgLeft.value = prevI * w.value
+  imgTop.value = prevJ * w.value
+  maskX = imgLeft.value
+  maskY = imgTop.value
+  current = grid[prevI + prevJ * prevCols] ?? grid[0]
+
+  if (exit.value) {
+    exit.value = {
+      ...exit.value,
+      x: exit.value.i * w.value,
+      y: exit.value.j * w.value,
+    }
+  }
+
+  goldArray.value = goldArray.value.map((g) => {
+    const i = g.i ?? Math.round((g.x ?? 0) / (prevW || 1))
+    const j = g.j ?? Math.round((g.y ?? 0) / (prevW || 1))
+    return { ...g, i, j, x: i * w.value, y: j * w.value }
+  })
+
+  magnifying.value = magnifying.value.map((m) => {
+    const i = m.i ?? Math.round((m.x ?? 0) / (prevW || 1))
+    const j = m.j ?? Math.round((m.y ?? 0) / (prevW || 1))
+    return { ...m, i, j, x: i * w.value, y: j * w.value }
+  })
+
+  gift.value = gift.value.map((g) => {
+    const i = g.i ?? Math.round((g.x ?? 0) / (prevW || 1))
+    const j = g.j ?? Math.round((g.y ?? 0) / (prevW || 1))
+    return { ...g, i, j, x: i * w.value, y: j * w.value }
+  })
+
+  renderMaze()
+  updateMask()
 }
 
 // 优化金币生成逻辑，确保每一关都有金币

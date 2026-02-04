@@ -2,30 +2,6 @@
 import { isDark } from '~/composables'
 import { hideMask, n } from './canvas'
 
-const content = ref('欢迎来到寻找金币游戏')
-const contentList = [
-  '欢迎来到寻找金币游戏！使用方向键或WASD移动',
-  '收集所有金币以开启出口，再前往绿色出口通关',
-  '礼物盒会给你惊喜！点击星星可收藏此游戏',
-  '每一关难度都会增加，迷宫更大，金币更多',
-  '找到所有金币，挑战自己的迷宫解谜能力！',
-]
-const index = ref(0)
-function finish() {
-  if (index.value < contentList.length - 1)
-    index.value++
-  else index.value = 0
-  setTimeout(() => {
-    content.value = contentList[index.value]
-  }, 500)
-}
-
-function styleFn(i: number) {
-  return `color:rgb(${Math.random() * 255},${Math.random() * 255}, ${
-    Math.random() * 255
-  });animation-delay:${i * 0.1}s;`
-}
-
 const Title = ref('寻找金币')
 function finishTitle() {
   if (Title.value === '寻找金币')
@@ -189,17 +165,6 @@ function onGlobalKeyDown(e: KeyboardEvent) {
           <Flee v-if="!is3D" :sound-enabled="soundEnabled" class="game-board" />
           <Flee3D v-else :sound-enabled="soundEnabled" class="game-board" />
         </div>
-
-        <div class="game-info">
-          <vivid-typing
-            :content="content"
-            :speed="2"
-            h-20px
-            :spilt-style="styleFn"
-            spilt-tag="span"
-            :finish="finish"
-          />
-        </div>
       </div>
 
       <div class="game-footer">
@@ -267,10 +232,11 @@ function onGlobalKeyDown(e: KeyboardEvent) {
 
 .app-shell {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
   align-items: center;
+  justify-content: flex-start;
   min-height: 100vh;
-  padding: 10px;
+  padding: 14px 10px 12px;
 }
 
 .app-card {
@@ -344,11 +310,10 @@ function onGlobalKeyDown(e: KeyboardEvent) {
 
 .game-content {
   position: relative;
-  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding-bottom: 10px;
+  padding-bottom: 12px;
 }
 
 .game-stage {
@@ -395,10 +360,10 @@ function onGlobalKeyDown(e: KeyboardEvent) {
   height: 100%;
 }
 
-:global(.game-stage:fullscreen) :deep(.game-board-container canvas),
-:global(.game-stage:-webkit-full-screen) :deep(.game-board-container canvas) {
-  width: min(100vw, 100vh);
-  height: min(100vw, 100vh);
+:global(.game-stage:fullscreen) :deep(.board-layer),
+:global(.game-stage:-webkit-full-screen) :deep(.board-layer) {
+  width: min(100vw, 100vh, 100%);
+  height: min(100vw, 100vh, 100%);
 }
 
 .fs-fab {
@@ -464,16 +429,25 @@ function onGlobalKeyDown(e: KeyboardEvent) {
 }
 
 .game-info {
-  margin: 15px;
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  margin: 0;
   text-align: center;
-  padding: 10px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.44), rgba(0, 0, 0, 0.22));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(10px);
+  pointer-events: none;
+  max-width: 560px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .game-footer {
-  padding: 10px 15px;
+  padding: 8px 14px 12px;
 }
 
 .level-badge {
@@ -555,8 +529,11 @@ function onGlobalKeyDown(e: KeyboardEvent) {
 
   .game-info {
     font-size: 0.9rem;
-    margin: 10px;
-    padding: 8px;
+    position: static;
+    margin: 10px 10px 0;
+    padding: 8px 10px;
+    max-width: none;
+    pointer-events: none;
   }
 
   /* 调整弹窗宽度，确保更适合移动设备 */
@@ -590,7 +567,8 @@ function onGlobalKeyDown(e: KeyboardEvent) {
   width: 100% !important;
   height: 100% !important;
   padding: 0 !important;
-  display: block !important;
+  display: flex !important;
+  flex-direction: column !important;
 }
 
 .game-stage:fullscreen .flee3d,
@@ -611,15 +589,14 @@ function onGlobalKeyDown(e: KeyboardEvent) {
 .game-stage:fullscreen .game-board-container,
 .game-stage:-webkit-full-screen .game-board-container {
   width: 100% !important;
-  height: 100% !important;
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
 }
 
-.game-stage:fullscreen .game-board-container canvas,
-.game-stage:-webkit-full-screen .game-board-container canvas {
-  width: min(100vw, 100vh) !important;
-  height: min(100vw, 100vh) !important;
+.game-stage:fullscreen .board-layer,
+.game-stage:-webkit-full-screen .board-layer {
+  width: min(100vw, 100vh, 100%) !important;
+  height: min(100vw, 100vh, 100%) !important;
 }
 </style>

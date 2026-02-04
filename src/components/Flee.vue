@@ -13,6 +13,7 @@ import {
   magnifying,
   n,
   rangeScope,
+  resizeBoard,
   rightMove,
   setup,
   start,
@@ -30,7 +31,7 @@ const props = defineProps({
   },
 })
 
-const FleeEl = ref<HTMLElement | null>(null)
+const boardLayerEl = ref<HTMLElement | null>(null)
 const canvas = setup()
 const mask = initMask()
 const upgrade = ref(false)
@@ -38,6 +39,17 @@ const upgrade = ref(false)
 const animate = ref(false)
 const steps = ref(0)
 const bumping = ref(false)
+let resizeObserver: ResizeObserver | null = null
+
+function syncBoardSize() {
+  const el = boardLayerEl.value
+  if (!el)
+    return
+  const rect = el.getBoundingClientRect()
+  const size = Math.floor(Math.min(rect.width, rect.height))
+  if (size > 0)
+    resizeBoard(size, { preserve: true })
+}
 
 interface LevelRecord {
   time: number
@@ -88,10 +100,18 @@ watch(hideMask, (newV) => {
 
 // Initialize game board
 onMounted(() => {
-  if (!FleeEl.value)
+  if (!boardLayerEl.value)
     return
-  FleeEl.value.appendChild(canvas)
-  FleeEl.value.appendChild(mask)
+  boardLayerEl.value.prepend(canvas)
+  boardLayerEl.value.appendChild(mask)
+
+  // First sync after DOM settles (incl. fullscreen CSS changes)
+  requestAnimationFrame(syncBoardSize)
+
+  resizeObserver?.disconnect()
+  resizeObserver = new ResizeObserver(() => syncBoardSize())
+  resizeObserver.observe(boardLayerEl.value)
+  window.addEventListener('resize', syncBoardSize)
 })
 
 // Keyboard controls
@@ -193,6 +213,9 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', keydown)
   document.body.removeEventListener('touchmove', onTouchMove)
   window.removeEventListener('touchstart', touchstart)
+  window.removeEventListener('resize', syncBoardSize)
+  resizeObserver?.disconnect()
+  resizeObserver = null
 })
 
 // Prevent too rapid movements
@@ -473,55 +496,57 @@ function winSound() {
       <div class="progress-bar" :style="{ width: `${progress}%` }" />
     </div>
     <!-- Game board -->
-    <div ref="FleeEl" relative overflow-hidden rounded-lg class="game-board-container" :class="{ bump: bumping }">
-      <!-- Player character -->
-      <img
-        absolute
-        src="/img/fire.svg"
-        :style="{ width: `${w}px`, left: `${imgLeft}px`, top: `${imgTop}px` }"
-        class="player"
-        alt="fire"
-      >
-      <!-- Gold items -->
-      <template v-for="item in goldArray" :key="`${item.i}-${item.j}`">
+    <div relative overflow-hidden rounded-lg class="game-board-container" :class="{ bump: bumping }">
+      <div ref="boardLayerEl" class="board-layer">
+        <!-- Player character -->
         <img
-          v-if="item.show"
-          src="/img/gold.svg"
-          :style="{ width: `${w * 0.75}px`, left: `${item.x + 3}px`, top: `${item.y + 3}px` }"
           absolute
-          class="gold-item"
-          alt="gold"
+          src="/img/fire.svg"
+          :style="{ width: `${w}px`, left: `${imgLeft}px`, top: `${imgTop}px` }"
+          class="player"
+          alt="fire"
         >
-      </template>
-      <!-- Exit (unlock after collecting all gold) -->
-      <img
-        v-if="exit"
-        src="/img/exit.svg"
-        :style="{ width: `${w}px`, left: `${exit.x}px`, top: `${exit.y}px` }"
-        absolute
-        class="exit-item"
-        :class="[exitUnlocked ? 'exit-open' : 'exit-locked', isOnExit && exitUnlocked && 'exit-reached']"
-        alt="exit"
-        :title="exitUnlocked ? '出口已开启' : '收集所有金币以开启出口'"
-      >
-      <!-- Wood items -->
-      <template v-for="item in magnifying" :key="`${item.i}-${item.j}`">
+        <!-- Gold items -->
+        <template v-for="item in goldArray" :key="`${item.i}-${item.j}`">
+          <img
+            v-if="item.show"
+            src="/img/gold.svg"
+            :style="{ width: `${w * 0.75}px`, left: `${item.x + 3}px`, top: `${item.y + 3}px` }"
+            absolute
+            class="gold-item"
+            alt="gold"
+          >
+        </template>
+        <!-- Exit (unlock after collecting all gold) -->
         <img
-          v-if="item.show" :style="{ width: `${w}px`, left: `${item.x}px`, top: `${item.y}px` }"
-          absolute src="/img/wood.svg" class="wood-item" alt="wood"
+          v-if="exit"
+          src="/img/exit.svg"
+          :style="{ width: `${w}px`, left: `${exit.x}px`, top: `${exit.y}px` }"
+          absolute
+          class="exit-item"
+          :class="[exitUnlocked ? 'exit-open' : 'exit-locked', isOnExit && exitUnlocked && 'exit-reached']"
+          alt="exit"
+          :title="exitUnlocked ? '出口已开启' : '收集所有金币以开启出口'"
         >
-      </template>
-      <!-- Gift items -->
-      <template v-for="item in gift" :key="`${item.i}-${item.j}`">
-        <img
-          v-if="item.show" :src="item.url" :style="{ width: `${w}px`, left: `${item.x}px`, top: `${item.y}px` }"
-          absolute class="gift-item" alt="gift"
-        >
-        <img
-          v-if="item.srcShow" fixed top-0 bottom-0 left-0 right-0 z-99 h-full md:min-w-150 :src="item.src" ma
-          alt="pic"
-        >
-      </template>
+        <!-- Wood items -->
+        <template v-for="item in magnifying" :key="`${item.i}-${item.j}`">
+          <img
+            v-if="item.show" :style="{ width: `${w}px`, left: `${item.x}px`, top: `${item.y}px` }"
+            absolute src="/img/wood.svg" class="wood-item" alt="wood"
+          >
+        </template>
+        <!-- Gift items -->
+        <template v-for="item in gift" :key="`${item.i}-${item.j}`">
+          <img
+            v-if="item.show" :src="item.url" :style="{ width: `${w}px`, left: `${item.x}px`, top: `${item.y}px` }"
+            absolute class="gift-item" alt="gift"
+          >
+          <img
+            v-if="item.srcShow" fixed top-0 bottom-0 left-0 right-0 z-99 h-full md:min-w-150 :src="item.src" ma
+            alt="pic"
+          >
+        </template>
+      </div>
     </div>
     <!-- Mobile controls -->
     <div class="mobile-controls show-on-mobile">
@@ -693,6 +718,11 @@ function winSound() {
     min-height: 0;
     position: relative;
     width: 100%;
+  }
+
+  .board-layer {
+    position: relative;
+    display: inline-block;
   }
 
   /* 添加移动端专用样式 */
