@@ -21,6 +21,9 @@ describe('3D step logic', () => {
     expect(next[0].show).toBe(true)
     expect(next[1].show).toBe(false)
     expect(next[2].show).toBe(false)
+
+    // should not mutate original
+    expect(gold[1].show).toBe(true)
   })
 
   it('increments steps only when changing cells', () => {
@@ -39,6 +42,8 @@ describe('3D step logic', () => {
   })
 
   it('unlocks exit only when all gold is collected', () => {
+    expect(shouldUnlockExit([])).toBe(false)
+
     const gold = [
       { i: 0, j: 1, show: false },
       { i: 1, j: 1, show: true },

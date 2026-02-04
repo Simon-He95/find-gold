@@ -120,6 +120,8 @@ function onPointerLockChange() {
   const el = document.pointerLockElement
   locked.value = !!el
   paused.value = !locked.value
+  if (!locked.value)
+    resetInput()
 }
 
 function onKeyDown(e: KeyboardEvent) {
