@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cellFromWorld, collectAtCell, isOnExit, remainingGold, shouldAdvanceLevel, shouldUnlockExit } from '../src/maze/step'
+import { cellFromWorld, collectAtCell, isOnExit, remainingGold, shouldAdvanceLevel, shouldUnlockExit, stepCounter } from '../src/maze/step'
 
 describe('3D step logic', () => {
   it('maps world coordinates to clamped cell indices', () => {
@@ -21,6 +21,21 @@ describe('3D step logic', () => {
     expect(next[0].show).toBe(true)
     expect(next[1].show).toBe(false)
     expect(next[2].show).toBe(false)
+  })
+
+  it('increments steps only when changing cells', () => {
+    const last = { i: 0, j: 0 }
+    expect(stepCounter(0, last, { i: 0, j: 0 })).toEqual({ steps: 0, lastCell: last, stepped: false })
+    expect(stepCounter(0, last, { i: 1, j: 0 })).toEqual({ steps: 1, lastCell: { i: 1, j: 0 }, stepped: true })
+    expect(stepCounter(10, { i: 2, j: 2 }, { i: 2, j: 3 })).toEqual({ steps: 11, lastCell: { i: 2, j: 3 }, stepped: true })
+  })
+
+  it('preserves extra gold fields when collected', () => {
+    const gold: any[] = [{ i: 1, j: 1, show: true, sparkle: 123 }]
+    const { gold: next, collected } = collectAtCell(gold as any, { i: 1, j: 1 })
+    expect(collected).toBe(1)
+    expect((next[0] as any).sparkle).toBe(123)
+    expect(next[0].show).toBe(false)
   })
 
   it('unlocks exit only when all gold is collected', () => {
@@ -51,4 +66,3 @@ describe('3D step logic', () => {
     expect(shouldAdvanceLevel(goldDone, true, cell, exit)).toBe(true)
   })
 })
-

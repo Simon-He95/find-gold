@@ -14,6 +14,12 @@ export interface GoldCell {
   show: boolean
 }
 
+export function stepCounter(prevSteps: number, lastCell: GridCell, cell: GridCell) {
+  if (cell.i === lastCell.i && cell.j === lastCell.j)
+    return { steps: prevSteps, lastCell, stepped: false }
+  return { steps: prevSteps + 1, lastCell: { i: cell.i, j: cell.j }, stepped: true }
+}
+
 export function cellFromWorld(
   x: number,
   z: number,

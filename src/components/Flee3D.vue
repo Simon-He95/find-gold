@@ -12,7 +12,7 @@ import {
   win,
 } from '../canvas'
 import { manhattanCellDistance, moveWithGridCollisions } from '../maze/collision'
-import { cellFromWorld, collectAtCell, shouldAdvanceLevel, shouldUnlockExit } from '../maze/step'
+import { cellFromWorld, collectAtCell, shouldAdvanceLevel, shouldUnlockExit, stepCounter } from '../maze/step'
 
 const props = defineProps({
   soundEnabled: {
@@ -145,6 +145,8 @@ function onKeyUp(e: KeyboardEvent) {
 function onMouseMove(e: MouseEvent) {
   if (!locked.value)
     return
+  if (isInputLocked())
+    return
   const sensitivity = 0.0022
   yawTarget -= e.movementX * sensitivity
   pitchTarget -= e.movementY * sensitivity
@@ -176,10 +178,9 @@ function currentCell() {
 
 function collectIfNeeded() {
   const cell = currentCell()
-  if (cell.i !== lastCell.i || cell.j !== lastCell.j) {
-    steps.value++
-    lastCell = { i: cell.i, j: cell.j }
-  }
+  const stepped = stepCounter(steps.value, lastCell, cell)
+  steps.value = stepped.steps
+  lastCell = stepped.lastCell
 
   const before = remainingGold.value
   const { gold, collected } = collectAtCell(goldArray.value, cell)
