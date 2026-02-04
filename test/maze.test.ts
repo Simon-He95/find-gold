@@ -198,4 +198,39 @@ describe('grid collision', () => {
       rnd.mockRestore()
     }
   })
+
+  it('does not bypass a closed wall when moving diagonally', () => {
+    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.42)
+    try {
+      setup()
+      const snap = getMazeSnapshot()
+      const cfg = { cellSize: 1, radius: 0.2, height: 1.6, epsilon: 0.001 }
+
+      let picked: { i: number, j: number } | null = null
+      for (let j = 0; j < snap.rows; j++) {
+        for (let i = 0; i < snap.cols - 1; i++) {
+          const cell = getCell(snap, i, j)!
+          if (cell.walls[3]) {
+            picked = { i, j }
+            break
+          }
+        }
+        if (picked)
+          break
+      }
+
+      expect(picked).not.toBeNull()
+      const { i, j } = picked!
+      const start = { x: i + 0.5, y: 0.55, z: j + 0.5 }
+
+      // Attempt to move towards the closed right wall, with a small Z component.
+      const moved = moveWithGridCollisions(snap, cfg, start, 0.8, 0.3)
+      const maxLocal = cfg.cellSize - cfg.radius - cfg.epsilon
+      const maxX = i * cfg.cellSize + maxLocal
+      expect(moved.x).toBeLessThanOrEqual(maxX + 1e-6)
+    }
+    finally {
+      rnd.mockRestore()
+    }
+  })
 })

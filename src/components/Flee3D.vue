@@ -12,6 +12,7 @@ import {
   win,
 } from '../canvas'
 import { manhattanCellDistance, moveWithGridCollisions } from '../maze/collision'
+import { cellFromWorld, collectAtCell, shouldAdvanceLevel, shouldUnlockExit } from '../maze/step'
 
 const props = defineProps({
   soundEnabled: {
@@ -170,37 +171,33 @@ function setCameraPose() {
 
 function currentCell() {
   const snap = getMazeSnapshot()
-  const i = Math.max(0, Math.min(snap.cols - 1, Math.floor(player.x / cellSize)))
-  const j = Math.max(0, Math.min(snap.rows - 1, Math.floor(player.z / cellSize)))
-  return { i, j }
+  return cellFromWorld(player.x, player.z, cellSize, snap.cols, snap.rows)
 }
 
 function collectIfNeeded() {
-  const { i, j } = currentCell()
-  if (i !== lastCell.i || j !== lastCell.j) {
+  const cell = currentCell()
+  if (cell.i !== lastCell.i || cell.j !== lastCell.j) {
     steps.value++
-    lastCell = { i, j }
+    lastCell = { i: cell.i, j: cell.j }
   }
 
   const before = remainingGold.value
-  for (const g of goldArray.value) {
-    if (!g.show)
-      continue
-    if (g.i === i && g.j === j) {
-      g.show = false
-      tryPlay(audioGold)
-    }
+  const { gold, collected } = collectAtCell(goldArray.value, cell)
+  if (collected) {
+    tryPlay(audioGold)
+    goldArray.value = gold as any
   }
-  if (before !== remainingGold.value)
+  if (before !== remainingGold.value) {
     syncGoldMeshes()
+  }
 
-  if (totalGold.value && remainingGold.value === 0 && !exitUnlocked.value) {
+  if (!exitUnlocked.value && shouldUnlockExit(goldArray.value as any)) {
     exitUnlocked.value = true
     syncExitMaterial()
   }
 
   const snap = getMazeSnapshot()
-  if (exitUnlocked.value && snap.exit && snap.exit.i === i && snap.exit.j === j)
+  if (shouldAdvanceLevel(goldArray.value as any, exitUnlocked.value, cell, snap.exit))
     advanceLevel()
 }
 
