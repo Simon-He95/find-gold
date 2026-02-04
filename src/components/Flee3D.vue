@@ -12,7 +12,7 @@ import {
   win,
 } from '../canvas'
 import { manhattanCellDistance, moveWithGridCollisions } from '../maze/collision'
-import { cellFromWorld, collectAtCell, shouldAdvanceLevel, shouldUnlockExit, stepCounter } from '../maze/step'
+import { cellFromWorld, collectAtCell, collectedGold, shouldAdvanceLevel, shouldUnlockExit, stepCounter } from '../maze/step'
 
 const props = defineProps({
   soundEnabled: {
@@ -37,6 +37,7 @@ const now = useNow()
 const countDown = computed(() => Math.round((+now.value - start.value) / 1000))
 const remainingGold = computed(() => goldArray.value.filter(g => g.show).length)
 const totalGold = computed(() => goldArray.value.length)
+const collectedGoldCount = computed(() => collectedGold(goldArray.value as any))
 
 const showWin = ref(false)
 const winText = ref('')
@@ -630,7 +631,7 @@ const exitHint = computed(() => {
     return ''
   const cell = currentCell()
   const dist = manhattanCellDistance(cell, snap.exit)
-  return exitUnlocked.value ? `出口约 ${dist} 步` : '出口未开启'
+  return exitUnlocked.value ? `出口约 ${dist} 步` : `出口未开启（剩余 ${remainingGold.value}）`
 })
 </script>
 
@@ -644,7 +645,7 @@ const exitHint = computed(() => {
         </div>
         <div class="pill">
           <img src="/img/gold.svg" class="icon" alt="gold">
-          <span class="value">{{ remainingGold }}</span>
+          <span class="value">{{ collectedGoldCount }}</span>
           <span class="sub">/ {{ totalGold }}</span>
         </div>
         <div class="pill">

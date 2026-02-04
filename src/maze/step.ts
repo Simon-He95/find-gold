@@ -55,6 +55,10 @@ export function remainingGold(gold: GoldCell[]) {
   return remaining
 }
 
+export function collectedGold(gold: GoldCell[]) {
+  return gold.length - remainingGold(gold)
+}
+
 export function shouldUnlockExit(gold: GoldCell[]) {
   return gold.length > 0 && remainingGold(gold) === 0
 }

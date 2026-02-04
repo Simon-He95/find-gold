@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cellFromWorld, collectAtCell, isOnExit, remainingGold, shouldAdvanceLevel, shouldUnlockExit, stepCounter } from '../src/maze/step'
+import { cellFromWorld, collectAtCell, collectedGold, isOnExit, remainingGold, shouldAdvanceLevel, shouldUnlockExit, stepCounter } from '../src/maze/step'
 
 describe('3D step logic', () => {
   it('maps world coordinates to clamped cell indices', () => {
@@ -49,9 +49,11 @@ describe('3D step logic', () => {
       { i: 1, j: 1, show: true },
     ]
     expect(remainingGold(gold)).toBe(1)
+    expect(collectedGold(gold)).toBe(1)
     expect(shouldUnlockExit(gold)).toBe(false)
     const { gold: next } = collectAtCell(gold, { i: 1, j: 1 })
     expect(remainingGold(next)).toBe(0)
+    expect(collectedGold(next)).toBe(2)
     expect(shouldUnlockExit(next)).toBe(true)
   })
 
