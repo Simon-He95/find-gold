@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { isDark } from '~/composables'
-import { n } from './canvas'
+import { hideMask, n } from './canvas'
 
 const content = ref('欢迎来到寻找金币游戏')
 const contentList = [
@@ -97,12 +97,27 @@ onMounted(() => {
   syncFullscreen()
   document.addEventListener('fullscreenchange', syncFullscreen)
   document.addEventListener('webkitfullscreenchange', syncFullscreen as any)
+
+  window.addEventListener('keydown', onGlobalKeyDown)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('fullscreenchange', syncFullscreen)
   document.removeEventListener('webkitfullscreenchange', syncFullscreen as any)
+  window.removeEventListener('keydown', onGlobalKeyDown)
 })
+
+function onGlobalKeyDown(e: KeyboardEvent) {
+  if (e.code !== 'KeyM' || e.repeat)
+    return
+
+  // 3D mode handles KeyM inside Flee3D (to avoid double-toggle).
+  if (is3D.value)
+    return
+
+  hideMask.value = !hideMask.value
+  e.preventDefault()
+}
 </script>
 
 <template>
@@ -197,6 +212,9 @@ onBeforeUnmount(() => {
             </p>
             <p class="mb2">
               <b>上帝视角：</b>3D模式下可按 M 切换；也可在底部“第一人称/上帝视角”按钮切换
+            </p>
+            <p class="mb2">
+              <b>2D上帝视角：</b>2D模式下按 M 可切换迷雾/上帝视角（上帝视角会移除黑色迷雾遮罩）
             </p>
             <p class="mb2">
               <b>道具说明：</b>

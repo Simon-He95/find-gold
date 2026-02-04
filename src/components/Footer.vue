@@ -35,7 +35,7 @@ function toggleCheatMode() {
       <div class="game-mode-toggle">
         <button
           class="icon-button"
-          :title="is3D ? (godView ? '关闭上帝视角 (M)' : '开启上帝视角 (M)') : (hideMask ? '关闭作弊模式' : '开启作弊模式')"
+          :title="is3D ? (godView ? '关闭上帝视角 (M / Esc后可点)' : '开启上帝视角 (M / Esc后可点)') : (hideMask ? '关闭上帝视角 (M)' : '开启上帝视角 (M)')"
           @click="toggleCheatMode"
         >
           <template v-if="is3D">
@@ -51,7 +51,7 @@ function toggleCheatMode() {
             {{ godView ? '上帝视角' : '第一人称' }}
           </template>
           <template v-else>
-            {{ hideMask ? '作弊模式' : '正常模式' }}
+            {{ hideMask ? '上帝视角' : '迷雾模式' }}
           </template>
         </span>
       </div>
