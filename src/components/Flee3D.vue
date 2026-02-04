@@ -853,7 +853,7 @@ const exitHint = computed(() => {
             点击画面进入（锁定鼠标）<br>
             移动：WASD  冲刺：Shift<br>
             转角：Q / E（顺滑转身）<br>
-            上帝视角：M（或底部按钮）<br>
+            上帝视角：M<br>
             退出：Esc
           </div>
           <button class="btn" type="button">

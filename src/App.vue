@@ -60,6 +60,15 @@ function toggleHelp() {
 
 const viewMode = useStorage<'2d' | '3d'>('FIND_GOLD_view_mode', '2d')
 const is3D = computed(() => viewMode.value === '3d')
+const godView = useStorage<boolean>('FIND_GOLD_god_view', false)
+
+watch(viewMode, () => {
+  // Switching view mode should always leave "god view" state.
+  godView.value = false
+  hideMask.value = false
+  document.exitPointerLock?.()
+})
+
 function toggleViewMode() {
   viewMode.value = is3D.value ? '2d' : '3d'
 }
@@ -211,7 +220,7 @@ function onGlobalKeyDown(e: KeyboardEvent) {
               <b>全屏模式：</b>点击右上角全屏按钮，可更沉浸地游玩（建议搭配3D模式）
             </p>
             <p class="mb2">
-              <b>上帝视角：</b>3D模式下可按 M 切换；也可在底部“第一人称/上帝视角”按钮切换
+              <b>上帝视角：</b>按 M 切换（2D/3D均可）
             </p>
             <p class="mb2">
               <b>2D上帝视角：</b>2D模式下按 M 可切换迷雾/上帝视角（上帝视角会移除黑色迷雾遮罩）
@@ -344,7 +353,8 @@ function onGlobalKeyDown(e: KeyboardEvent) {
   position: relative;
 }
 
-:global(.game-stage:fullscreen) {
+:global(.game-stage:fullscreen),
+:global(.game-stage:-webkit-full-screen) {
   width: 100vw;
   height: 100vh;
   display: flex;
@@ -353,17 +363,20 @@ function onGlobalKeyDown(e: KeyboardEvent) {
   background: radial-gradient(circle at 40% 30%, rgba(15, 23, 42, 0.65), rgba(0, 0, 0, 0.85));
 }
 
-:global(.game-stage:fullscreen) .game-board {
+:global(.game-stage:fullscreen) .game-board,
+:global(.game-stage:-webkit-full-screen) .game-board {
   padding: 0;
   align-items: stretch;
   height: 100%;
 }
 
-:global(.game-stage:fullscreen) :deep(.flee3d) {
+:global(.game-stage:fullscreen) :deep(.flee3d),
+:global(.game-stage:-webkit-full-screen) :deep(.flee3d) {
   height: 100%;
 }
 
-:global(.game-stage:fullscreen) :deep(.three-root) {
+:global(.game-stage:fullscreen) :deep(.three-root),
+:global(.game-stage:-webkit-full-screen) :deep(.three-root) {
   max-width: none;
   width: 100%;
   height: 100%;
@@ -371,12 +384,14 @@ function onGlobalKeyDown(e: KeyboardEvent) {
   border-radius: 0;
 }
 
-:global(.game-stage:fullscreen) :deep(.three-root canvas) {
+:global(.game-stage:fullscreen) :deep(.three-root canvas),
+:global(.game-stage:-webkit-full-screen) :deep(.three-root canvas) {
   width: 100%;
   height: 100%;
 }
 
-:global(.game-stage:fullscreen) :deep(.game-board-container canvas) {
+:global(.game-stage:fullscreen) :deep(.game-board-container canvas),
+:global(.game-stage:-webkit-full-screen) :deep(.game-board-container canvas) {
   width: min(100vw, 100vh);
   height: min(100vw, 100vh);
 }
