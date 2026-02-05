@@ -1,3 +1,4 @@
+const process = require('node:process')
 const { defineConfig } = require('@playwright/test')
 
 process.env.NO_PROXY = '127.0.0.1,localhost'

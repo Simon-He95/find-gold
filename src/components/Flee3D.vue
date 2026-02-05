@@ -31,6 +31,20 @@ const steps = ref(0)
 const bumping = ref(false)
 const debugTorch = ref(false)
 const debugTorchText = ref('')
+const funMirrors = useStorage<boolean>('FIND_GOLD_fun_mirrors', true)
+const touchPreferred = ref(false)
+const touchActive = ref(false)
+
+const devFlags = (() => {
+  if (!import.meta.env.DEV || typeof window === 'undefined') {
+    return { e2e: false, mirrorTest: false }
+  }
+  const qs = window.location.search || ''
+  return {
+    e2e: qs.includes('e2e=1'),
+    mirrorTest: qs.includes('mirrorTest=1'),
+  }
+})()
 
 interface LevelRecord {
   time: number
@@ -107,11 +121,34 @@ interface MaterialTextureSet {
 let wallTextures: MaterialTextureSet | null = null
 let floorTextures: MaterialTextureSet | null = null
 
+type MagicMirrorVariant = 'self' | 'demon' | 'ghost'
+interface MagicMirror {
+  group: THREE.Group
+  surface: THREE.Mesh
+  apparition: THREE.Mesh
+  normal: THREE.Vector3
+  rng: () => number
+  nextSwapAt: number
+  current: MagicMirrorVariant
+  seed: number
+  swapCount: number
+}
+
+let magicMirrors: MagicMirror[] = []
+let magicMirrorTextures: Record<MagicMirrorVariant, THREE.Texture> | null = null
+
 const keys = new Set<string>()
 let yaw = 0
 let pitch = 0
 let yawTarget = 0
 let pitchTarget = 0
+let touchPointerId: number | null = null
+let touchForward = false
+let touchHoldTimer = 0
+let touchLastX = 0
+let touchLastY = 0
+let touchLookSensitivity = 0.0062
+let lastPointerWasTouch = false
 
 const player = reactive({ x: 0.5, y: 0.55, z: 0.5 })
 let lastCell = { i: 0, j: 0 }
@@ -124,8 +161,14 @@ const torchOrigin = new THREE.Vector3()
 const torchForward = new THREE.Vector3()
 const torchAimWorld = new THREE.Vector3()
 const torchAimNdc = new THREE.Vector3()
-const meshHitsOnly = (hits: THREE.Intersection[]) =>
-  hits.filter(h => (h.object as any)?.isMesh)
+const mirrorV0 = new THREE.Vector3()
+const mirrorV1 = new THREE.Vector3()
+const mirrorV2 = new THREE.Vector3()
+const mirrorCamForward = new THREE.Vector3()
+const mirrorBox = new THREE.Box3()
+function meshHitsOnly(hits: THREE.Intersection[]) {
+  return hits.filter(h => (h.object as any)?.isMesh)
+}
 
 const torchTest = ref(false)
 const torchAimScreen = reactive({ x: 0, y: 0 })
@@ -140,6 +183,7 @@ const audioGold = document.createElement('audio')
 audioGold.src = '/bgm/gold.mp3'
 const audioWin = document.createElement('audio')
 audioWin.src = '/bgm/win.mp3'
+let audioPrimed = false
 
 watch(() => props.soundEnabled, (v) => {
   audioWalk.muted = !v
@@ -153,6 +197,7 @@ function isInputLocked() {
 
 function resetInput() {
   keys.clear()
+  resetTouchInput()
 }
 
 function bump() {
@@ -178,6 +223,11 @@ function makeRng(seed: number) {
 
 function clamp01(v: number) {
   return Math.max(0, Math.min(1, v))
+}
+
+function smoothstep(edge0: number, edge1: number, x: number) {
+  const t = clamp01((x - edge0) / (edge1 - edge0))
+  return t * t * (3 - 2 * t)
 }
 
 function heightToNormalMap(
@@ -419,6 +469,410 @@ function makeHeightField(kind: 'wall' | 'floor', size = 256, seed = 1) {
   return h
 }
 
+function disposeMagicMirrorTextures() {
+  if (!magicMirrorTextures)
+    return
+  for (const tex of Object.values(magicMirrorTextures))
+    tex.dispose()
+  magicMirrorTextures = null
+}
+
+function resetMagicMirrors() {
+  magicMirrors = []
+  disposeMagicMirrorTextures()
+}
+
+function removeMagicMirrorsFromScene() {
+  if (mazeGroup) {
+    for (const m of magicMirrors) {
+      mazeGroup.remove(m.group)
+      disposeObject(m.group)
+    }
+  }
+  resetMagicMirrors()
+}
+
+function makeMirrorApparitionTexture(kind: MagicMirrorVariant, seed: number, w = 256, h = 512) {
+  const rng = makeRng(seed)
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')!
+
+  // Transparent background so the apparition reads over the mirror surface
+  // instead of behaving like a full-screen poster.
+  ctx.clearRect(0, 0, w, h)
+
+  // very subtle edge vignette (keep alpha low)
+  const vg = ctx.createRadialGradient(w * 0.5, h * 0.5, 10, w * 0.5, h * 0.5, Math.max(w, h) * 0.7)
+  vg.addColorStop(0, 'rgba(255,255,255,0)')
+  vg.addColorStop(1, 'rgba(0,0,0,0.18)')
+  ctx.fillStyle = vg
+  ctx.fillRect(0, 0, w, h)
+
+  // smudges
+  ctx.globalAlpha = 0.10
+  for (let i = 0; i < 420; i++) {
+    const x = rng() * w
+    const y = rng() * h
+    const r = 6 + rng() * 24
+    const a = 0.08 + rng() * 0.12
+    ctx.fillStyle = `rgba(255,255,255,${a})`
+    ctx.beginPath()
+    ctx.arc(x, y, r, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.globalAlpha = 1
+
+  // scanlines
+  ctx.globalAlpha = 0.08
+  ctx.fillStyle = 'rgba(0,0,0,1)'
+  for (let y = 0; y < h; y += 2) {
+    ctx.fillRect(0, y, w, 1)
+  }
+  ctx.globalAlpha = 1
+
+  const cx = w * 0.5
+  const cy = h * 0.52
+  const faceR = Math.min(w, h) * 0.22
+
+  const drawGlowEyes = (color: string, tilt = 0) => {
+    ctx.save()
+    ctx.translate(cx, cy - faceR * 0.35)
+    ctx.rotate(tilt)
+    ctx.fillStyle = color
+    ctx.shadowColor = color
+    ctx.shadowBlur = 18
+    ctx.globalAlpha = 0.95
+    ctx.beginPath()
+    ctx.ellipse(-faceR * 0.38, 0, faceR * 0.16, faceR * 0.09, 0, 0, Math.PI * 2)
+    ctx.ellipse(faceR * 0.38, 0, faceR * 0.16, faceR * 0.09, 0, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.restore()
+    ctx.shadowBlur = 0
+  }
+
+  if (kind === 'self') {
+    // hood silhouette
+    ctx.fillStyle = 'rgba(8,12,24,0.62)'
+    ctx.beginPath()
+    ctx.ellipse(cx, cy, faceR * 1.15, faceR * 1.35, 0, 0, Math.PI * 2)
+    ctx.fill()
+
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'
+    ctx.beginPath()
+    ctx.ellipse(cx, cy + faceR * 0.12, faceR * 0.78, faceR * 0.92, 0, 0, Math.PI * 2)
+    ctx.fill()
+
+    drawGlowEyes('rgba(56,189,248,0.95)', (rng() - 0.5) * 0.08)
+  }
+  else if (kind === 'ghost') {
+    // Ghost girl: messy hair, long nails, blood stains (stylized).
+    // Hair mass
+    ctx.fillStyle = 'rgba(2,6,23,0.74)'
+    ctx.beginPath()
+    ctx.ellipse(cx, cy + faceR * 0.08, faceR * 1.38, faceR * 1.78, 0, 0, Math.PI * 2)
+    ctx.fill()
+
+    // Hair strands
+    ctx.globalAlpha = 0.30
+    ctx.strokeStyle = 'rgba(15,23,42,1)'
+    ctx.lineWidth = 2
+    for (let i = 0; i < 90; i++) {
+      const x = cx + (rng() - 0.5) * faceR * 2.4
+      const y0 = cy - faceR * (1.25 + rng() * 0.55)
+      const y1 = cy + faceR * (1.65 + rng() * 1.35)
+      const bend = (rng() - 0.5) * faceR * 0.4
+      ctx.beginPath()
+      ctx.moveTo(x, y0)
+      ctx.quadraticCurveTo(x + bend, (y0 + y1) * 0.52, x + bend * 0.2, y1)
+      ctx.stroke()
+    }
+    ctx.globalAlpha = 1
+
+    // Pale face peeking out
+    const face = ctx.createRadialGradient(cx, cy - faceR * 0.18, 6, cx, cy, faceR * 1.1)
+    face.addColorStop(0, 'rgba(226,232,240,0.74)')
+    face.addColorStop(0.62, 'rgba(226,232,240,0.22)')
+    face.addColorStop(1, 'rgba(226,232,240,0)')
+    ctx.fillStyle = face
+    ctx.beginPath()
+    ctx.ellipse(cx, cy, faceR * 0.7, faceR * 0.9, 0, 0, Math.PI * 2)
+    ctx.fill()
+
+    // Hollow eyes + faint glow
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'
+    ctx.beginPath()
+    ctx.ellipse(cx - faceR * 0.28, cy - faceR * 0.22, faceR * 0.16, faceR * 0.10, 0, 0, Math.PI * 2)
+    ctx.ellipse(cx + faceR * 0.28, cy - faceR * 0.22, faceR * 0.16, faceR * 0.10, 0, 0, Math.PI * 2)
+    ctx.fill()
+    drawGlowEyes('rgba(148,163,184,0.62)', (rng() - 0.5) * 0.05)
+
+    // Blood stains on dress area (stylized drips)
+    ctx.globalAlpha = 0.45
+    for (let i = 0; i < 10; i++) {
+      const x = cx + (rng() - 0.5) * faceR * 1.4
+      const y = cy + faceR * (0.75 + rng() * 1.25)
+      const len = faceR * (0.35 + rng() * 0.95)
+      const w0 = faceR * (0.05 + rng() * 0.08)
+      const grad = ctx.createLinearGradient(0, y, 0, y + len)
+      grad.addColorStop(0, 'rgba(127,29,29,0.7)')
+      grad.addColorStop(1, 'rgba(127,29,29,0)')
+      ctx.fillStyle = grad
+      // drip head
+      ctx.beginPath()
+      ctx.arc(x, y, w0 * 0.55, 0, Math.PI * 2)
+      ctx.fill()
+      // drip body
+      ctx.fillRect(x - w0 / 2, y, w0, len)
+    }
+    ctx.globalAlpha = 1
+
+    // Long nails / claws reaching up
+    ctx.globalAlpha = 0.58
+    ctx.fillStyle = 'rgba(15,23,42,0.95)'
+    for (let i = -2; i <= 2; i++) {
+      const x = cx + i * faceR * 0.18 + (rng() - 0.5) * 2
+      const y = cy + faceR * (0.42 + rng() * 0.12)
+      const len = faceR * (0.55 + rng() * 0.4)
+      ctx.beginPath()
+      ctx.moveTo(x, y)
+      ctx.lineTo(x + faceR * 0.04, y + len)
+      ctx.lineTo(x - faceR * 0.06, y + len)
+      ctx.closePath()
+      ctx.fill()
+    }
+    ctx.globalAlpha = 1
+  }
+  else {
+    // demon: horns + red eyes
+    ctx.fillStyle = 'rgba(0,0,0,0.68)'
+    ctx.beginPath()
+    ctx.ellipse(cx, cy + faceR * 0.1, faceR * 0.85, faceR * 1.05, 0, 0, Math.PI * 2)
+    ctx.fill()
+
+    ctx.fillStyle = 'rgba(17,24,39,0.9)'
+    ctx.beginPath()
+    ctx.moveTo(cx - faceR * 0.65, cy - faceR * 0.9)
+    ctx.lineTo(cx - faceR * 0.25, cy - faceR * 1.55)
+    ctx.lineTo(cx - faceR * 0.02, cy - faceR * 0.85)
+    ctx.closePath()
+    ctx.fill()
+    ctx.beginPath()
+    ctx.moveTo(cx + faceR * 0.65, cy - faceR * 0.9)
+    ctx.lineTo(cx + faceR * 0.25, cy - faceR * 1.55)
+    ctx.lineTo(cx + faceR * 0.02, cy - faceR * 0.85)
+    ctx.closePath()
+    ctx.fill()
+
+    drawGlowEyes('rgba(239,68,68,0.95)', (rng() - 0.5) * 0.12)
+
+    // teeth
+    ctx.globalAlpha = 0.75
+    ctx.fillStyle = 'rgba(255,255,255,0.9)'
+    const toothY = cy + faceR * 0.45
+    for (let i = -3; i <= 3; i++) {
+      const x = cx + i * faceR * 0.12 + (rng() - 0.5) * 2
+      const th = faceR * (0.12 + rng() * 0.08)
+      ctx.beginPath()
+      ctx.moveTo(x, toothY)
+      ctx.lineTo(x + faceR * 0.06, toothY + th)
+      ctx.lineTo(x - faceR * 0.06, toothY + th)
+      ctx.closePath()
+      ctx.fill()
+    }
+    ctx.globalAlpha = 1
+  }
+
+  // random “glitch” streaks to keep it uncanny
+  ctx.globalAlpha = 0.16
+  for (let i = 0; i < 26; i++) {
+    const y = Math.floor(rng() * h)
+    const hh = 1 + Math.floor(rng() * 5)
+    const x = Math.floor(rng() * w * 0.25)
+    const ww = Math.floor(w * (0.4 + rng() * 0.55))
+    ctx.fillStyle = rng() < 0.5 ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.35)'
+    ctx.fillRect(x, y, ww, hh)
+  }
+  ctx.globalAlpha = 1
+
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.needsUpdate = true
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.minFilter = THREE.LinearFilter
+  tex.magFilter = THREE.LinearFilter
+  return tex
+}
+
+function ensureMagicMirrorTextures() {
+  if (magicMirrorTextures)
+    return
+  const seedBase = ((n.value * 65537) ^ 0x5EEDBEEF) >>> 0
+  magicMirrorTextures = {
+    self: makeMirrorApparitionTexture('self', seedBase + 11),
+    demon: makeMirrorApparitionTexture('demon', seedBase + 13),
+    ghost: makeMirrorApparitionTexture('ghost', seedBase + 17),
+  }
+}
+
+function createMagicMirror(opts: { x: number, y: number, z: number, ry: number, normal: THREE.Vector3, seed: number }) {
+  ensureMagicMirrorTextures()
+  const textures = magicMirrorTextures!
+
+  const group = new THREE.Group()
+  group.position.set(opts.x, opts.y, opts.z)
+  group.rotation.y = opts.ry
+
+  // Keep within wall bounds and avoid clipping.
+  const mirrorW = 0.46
+  const mirrorH = wallHeight * 0.68
+
+  // frame as a border (avoid covering the mirror surface)
+  const frameDepth = 0.02
+  const frameBorder = 0.045
+  const frameGeoH = new THREE.BoxGeometry(mirrorW + frameBorder * 2, frameBorder, frameDepth)
+  const frameGeoV = new THREE.BoxGeometry(frameBorder, mirrorH, frameDepth)
+  const frameMat = new THREE.MeshStandardMaterial({
+    color: 0x0F172A,
+    roughness: 0.45,
+    metalness: 0.7,
+    emissive: new THREE.Color(0x020617),
+    emissiveIntensity: 0.08,
+  })
+  const frameZ = 0.012
+  const top = new THREE.Mesh(frameGeoH, frameMat)
+  top.position.set(0, mirrorH / 2 + frameBorder / 2, frameZ)
+  ;(top as any).userData.isMirrorSurface = true
+  group.add(top)
+  const bottom = new THREE.Mesh(frameGeoH, frameMat)
+  bottom.position.set(0, -(mirrorH / 2 + frameBorder / 2), frameZ)
+  ;(bottom as any).userData.isMirrorSurface = true
+  group.add(bottom)
+  const left = new THREE.Mesh(frameGeoV, frameMat)
+  left.position.set(-(mirrorW / 2 + frameBorder / 2), 0, frameZ)
+  ;(left as any).userData.isMirrorSurface = true
+  group.add(left)
+  const right = new THREE.Mesh(frameGeoV, frameMat)
+  right.position.set(mirrorW / 2 + frameBorder / 2, 0, frameZ)
+  ;(right as any).userData.isMirrorSurface = true
+  group.add(right)
+
+  // surface (dark glass)
+  const surfaceGeo = new THREE.PlaneGeometry(mirrorW, mirrorH)
+  const surfaceMat = new THREE.MeshPhysicalMaterial({
+    color: 0x020617,
+    roughness: 0.22,
+    metalness: 0.45,
+    clearcoat: 1,
+    clearcoatRoughness: 0.12,
+    reflectivity: 0.25,
+    transparent: true,
+    opacity: 0.92,
+    emissive: new THREE.Color(0x000000),
+    emissiveIntensity: 0,
+  })
+  const surface = new THREE.Mesh(surfaceGeo, surfaceMat)
+  surface.renderOrder = 1
+  ;(surface as any).userData.isMirrorSurface = true
+  surface.position.z = 0.004
+  group.add(surface)
+
+  // apparition layer (changes occasionally)
+  const appGeo = new THREE.PlaneGeometry(mirrorW * 0.92, mirrorH * 0.92)
+  const appMat = new THREE.MeshBasicMaterial({
+    map: textures.self,
+    color: 0xFFFFFF,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    blending: THREE.NormalBlending,
+    alphaTest: 0.02,
+    side: THREE.DoubleSide,
+  })
+  const apparition = new THREE.Mesh(appGeo, appMat)
+  apparition.position.z = 0.006
+  apparition.renderOrder = 2
+  ;(apparition as any).userData.isMirrorSurface = true
+  group.add(apparition)
+
+  const mirror: MagicMirror = {
+    group,
+    surface,
+    apparition,
+    normal: opts.normal.clone(),
+    rng: makeRng(opts.seed),
+    nextSwapAt: 0,
+    current: 'self' as const,
+    seed: opts.seed,
+    swapCount: 0,
+  }
+  return mirror
+}
+
+function spawnMagicMirrors(snap: any) {
+  if (!mazeGroup)
+    return
+  if (!funMirrors.value)
+    return
+
+  resetMagicMirrors()
+  ensureMagicMirrorTextures()
+
+  const seedBase = ((n.value * 8191) ^ 0xA11CE) >>> 0
+  const rng = makeRng(seedBase)
+
+  const y = wallHeight * 0.55
+  const eps = 0.0025
+  const candidates: Array<{ x: number, z: number, ry: number, normal: THREE.Vector3 }> = []
+  for (const c of snap.cells) {
+    const x0 = c.i * cellSize
+    const z0 = c.j * cellSize
+
+    if (c.walls[0]) {
+      candidates.push({ x: x0 + cellSize / 2, z: z0 + wallThickness + eps, ry: 0, normal: new THREE.Vector3(0, 0, 1) })
+    }
+    if (c.walls[2]) {
+      candidates.push({ x: x0 + wallThickness + eps, z: z0 + cellSize / 2, ry: Math.PI / 2, normal: new THREE.Vector3(1, 0, 0) })
+    }
+    if (c.j === snap.rows - 1 && c.walls[1]) {
+      candidates.push({ x: x0 + cellSize / 2, z: z0 + cellSize - wallThickness - eps, ry: Math.PI, normal: new THREE.Vector3(0, 0, -1) })
+    }
+    if (c.i === snap.cols - 1 && c.walls[3]) {
+      candidates.push({ x: x0 + cellSize - wallThickness - eps, z: z0 + cellSize / 2, ry: -Math.PI / 2, normal: new THREE.Vector3(-1, 0, 0) })
+    }
+  }
+
+  const area = Math.max(1, snap.cols * snap.rows)
+  const targetCount = Math.max(2, Math.min(6, Math.round(area / 28) + 1))
+
+  // pick a few, keep some spacing so they feel “special”
+  const chosen: Array<{ x: number, z: number, ry: number, normal: THREE.Vector3 }> = []
+  let attempts = 0
+  while (chosen.length < targetCount && candidates.length && attempts++ < 400) {
+    const idx = Math.floor(rng() * candidates.length)
+    const c = candidates.splice(idx, 1)[0]
+    mirrorV0.set(c.x, 0, c.z)
+    if (chosen.some((p) => {
+      mirrorV1.set(p.x, 0, p.z)
+      return mirrorV0.distanceTo(mirrorV1) < 2.2
+    })) {
+      continue
+    }
+    chosen.push(c)
+  }
+
+  for (let i = 0; i < chosen.length; i++) {
+    const c = chosen[i]
+    const seed = (((seedBase + i * 1013) ^ Math.floor(rng() * 0xFFFFFFFF)) >>> 0) || 1
+    const mirror = createMagicMirror({ x: c.x, y, z: c.z, ry: c.ry, normal: c.normal, seed })
+    mirror.group.visible = !godView.value
+    const now = clock?.elapsedTime ?? 0
+    mirror.nextSwapAt = devFlags.mirrorTest ? (now + 0.25 + mirror.rng() * 0.35) : (now + 0.6 + mirror.rng() * 2.8)
+    mazeGroup.add(mirror.group)
+    magicMirrors.push(mirror)
+  }
+}
+
 function ensureMaterialTextures() {
   if (wallTextures && floorTextures)
     return
@@ -453,7 +907,69 @@ function requestLock() {
   rootEl.value.requestPointerLock?.()
 }
 
+function primeAudio() {
+  if (audioPrimed)
+    return
+  audioPrimed = true
+
+  for (const a of [audioWalk, audioGold, audioWin]) {
+    const prevMuted = a.muted
+    a.muted = true
+    a.currentTime = 0
+    try {
+      const p = a.play()
+      if (p && typeof (p as any).then === 'function') {
+        p.then(() => {
+          a.pause()
+          a.currentTime = 0
+        }).catch(() => {}).finally(() => {
+          a.muted = prevMuted
+        })
+      }
+      else {
+        a.pause()
+        a.currentTime = 0
+        a.muted = prevMuted
+      }
+    }
+    catch {
+      a.muted = prevMuted
+    }
+  }
+}
+
+function shouldUseTouchControls() {
+  if (typeof window === 'undefined')
+    return false
+  if ('PointerEvent' in window)
+    return lastPointerWasTouch
+  return touchPreferred.value
+}
+
+function startPlay() {
+  if (isInputLocked())
+    return
+  primeAudio()
+  if (godView.value) {
+    locked.value = false
+    paused.value = false
+    return
+  }
+  if (shouldUseTouchControls()) {
+    touchActive.value = true
+    locked.value = false
+    paused.value = false
+    return
+  }
+  requestLock()
+}
+
 function onPointerLockChange() {
+  if (touchActive.value) {
+    locked.value = false
+    paused.value = false
+    return
+  }
   if (godView.value) {
     locked.value = false
     paused.value = false
@@ -464,6 +980,77 @@ function onPointerLockChange() {
   paused.value = !locked.value
   if (!locked.value)
     resetInput()
+}
+
+function resetTouchInput() {
+  touchPointerId = null
+  touchForward = false
+  if (touchHoldTimer) {
+    clearTimeout(touchHoldTimer)
+    touchHoldTimer = 0
+  }
+}
+
+function onRootPointerDown(e: PointerEvent) {
+  lastPointerWasTouch = e.pointerType === 'touch' || e.pointerType === 'pen'
+  if (!touchActive.value || godView.value)
+    return
+  if (isInputLocked())
+    return
+  if (e.pointerType !== 'touch' && e.pointerType !== 'pen')
+    return
+  if (touchPointerId !== null)
+    return
+
+  const el = e.currentTarget as HTMLElement | null
+  touchPointerId = e.pointerId
+  touchLastX = e.clientX
+  touchLastY = e.clientY
+  if (el) {
+    const rect = el.getBoundingClientRect()
+    touchLookSensitivity = Math.PI / Math.max(260, rect.width)
+  }
+  touchForward = false
+  if (touchHoldTimer) {
+    clearTimeout(touchHoldTimer)
+    touchHoldTimer = 0
+  }
+  touchHoldTimer = window.setTimeout(() => {
+    touchForward = true
+  }, 130)
+
+  el?.setPointerCapture?.(e.pointerId)
+  e.preventDefault()
+}
+
+function onRootPointerMove(e: PointerEvent) {
+  if (!touchActive.value || godView.value)
+    return
+  if (isInputLocked())
+    return
+  if (touchPointerId === null || e.pointerId !== touchPointerId)
+    return
+  if (e.pointerType !== 'touch' && e.pointerType !== 'pen')
+    return
+
+  const dx = e.clientX - touchLastX
+  const dy = e.clientY - touchLastY
+  touchLastX = e.clientX
+  touchLastY = e.clientY
+
+  yawTarget -= dx * touchLookSensitivity
+  pitchTarget -= dy * touchLookSensitivity
+  const limit = Math.PI * 0.48
+  pitchTarget = Math.max(-limit, Math.min(limit, pitchTarget))
+  e.preventDefault()
+}
+
+function onRootPointerUp(e: PointerEvent) {
+  if (touchPointerId === null || e.pointerId !== touchPointerId) {
+    return
+  }
+  ;(e.currentTarget as HTMLElement | null)?.releasePointerCapture?.(e.pointerId)
+  resetTouchInput()
 }
 
 function onKeyDown(e: KeyboardEvent) {
@@ -668,6 +1255,9 @@ function start3DLevel() {
   if (!scene || !mazeGroup)
     return
 
+  // mirrors use extra textures (materials don't auto-dispose maps)
+  resetMagicMirrors()
+
   // rebuild maze objects (per-level)
   for (const child of [...mazeGroup.children]) {
     mazeGroup.remove(child)
@@ -870,6 +1460,9 @@ function start3DLevel() {
   addEdges(hMesh)
   addEdges(vMesh)
 
+  // fun mirrors
+  spawnMagicMirrors(snap)
+
   // exit portal
   if (snap.exit) {
     const geo = new THREE.BoxGeometry(0.6, 1, 0.12)
@@ -942,6 +1535,10 @@ function start3DLevel() {
   mazeGroup.add(border)
   border.visible = godView.value
   borderHelper = border
+
+  // If the level size changes (cols/rows), the god-view orthographic frustum must be recomputed.
+  // Otherwise the new maze can be clipped until a manual resize/zoom occurs.
+  resize()
 }
 
 function initThree() {
@@ -1087,6 +1684,9 @@ function applyViewState(v: boolean) {
     borderHelper.visible = v
   if (mazeWallLines)
     mazeWallLines.visible = v
+  for (const m of magicMirrors) {
+    m.group.visible = !v
+  }
   for (const m of goldMeshes) {
     m.rotation.x = v ? 0 : Math.PI / 2
     m.position.y = v ? 0.06 : 0.18
@@ -1111,6 +1711,17 @@ watch(godView, (v) => {
   requestAnimationFrame(resize)
   requestAnimationFrame(setCameraPose)
 }, { immediate: true })
+
+watch(funMirrors, (v) => {
+  if (!mazeGroup)
+    return
+  if (!v) {
+    removeMagicMirrorsFromScene()
+    return
+  }
+  spawnMagicMirrors(getMazeSnapshot())
+  applyViewState(godView.value)
+})
 
 watch(godZoom, () => {
   if (!godCamera)
@@ -1238,6 +1849,10 @@ function updateTorchAim() {
       torchSpot.position.copy(hit.point).addScaledVector(normal, 0.02)
       const size = Math.min(1.55, Math.max(0.32, hit.distance * 0.09))
       torchSpot.scale.set(size, size, size)
+      const mat = torchSpot.material as THREE.SpriteMaterial
+      const isMirror = !!(hit.object as any)?.userData?.isMirrorSurface
+      // Mirrors should not show the torch hotspot; it washes out the apparition.
+      mat.opacity = isMirror ? 0 : 0.28
     }
     else {
       torchSpot.visible = false
@@ -1252,6 +1867,192 @@ function updateTorchAim() {
   }
 }
 
+function updateMagicMirrors(dt: number) {
+  if (godView.value)
+    return
+  if (!fpsCamera || !clock)
+    return
+  if (!funMirrors.value)
+    return
+  if (!magicMirrors.length)
+    return
+
+  const now = clock.elapsedTime
+  fpsCamera.getWorldDirection(mirrorCamForward)
+
+  for (const m of magicMirrors) {
+    m.group.getWorldPosition(mirrorV0)
+    // camera -> mirror (world)
+    mirrorV2.copy(mirrorV0).sub(fpsCamera.position)
+    const dist = Math.max(1e-6, mirrorV2.length())
+    mirrorV1.copy(mirrorV2).multiplyScalar(1 / dist)
+
+    // only when looking roughly at it
+    const viewDot = mirrorCamForward.dot(mirrorV1)
+    // only when in front of the mirror plane (same side as the normal points to)
+    const planeSide = m.normal.dot(mirrorV1) // < 0 means camera is in front of the mirror
+
+    // distance fade (closer = stronger)
+    const d = smoothstep(5.2, 1.0, dist)
+    const v = clamp01((viewDot - 0.22) / 0.55)
+    const p = clamp01(((-planeSide) - 0.05) / 0.55)
+    let strength = d * v * p
+
+    // slight breathing/flicker so it doesn’t look like a static poster
+    strength *= 0.85 + Math.sin((now * 2.2) + (m.seed % 1000) * 0.01) * 0.15
+
+    const appMat = m.apparition.material as THREE.MeshBasicMaterial
+    const targetOpacity = clamp01(strength * 0.98)
+    appMat.opacity += (targetOpacity - appMat.opacity) * Math.min(1, dt * 10)
+
+    const surfMat = m.surface.material as THREE.MeshPhysicalMaterial
+    surfMat.emissiveIntensity = 0.03 + appMat.opacity * (m.current === 'ghost' ? 0.26 : 0.18)
+    surfMat.emissive.setHex(m.current === 'demon' ? 0x1A0202 : (m.current === 'ghost' ? 0x0B1020 : 0x000000))
+
+    // small wobble
+    m.apparition.position.x = Math.sin(now * 1.1 + (m.seed % 777) * 0.01) * 0.006
+    m.apparition.position.y = Math.sin(now * 0.9 + (m.seed % 555) * 0.01) * 0.004
+
+    if (appMat.opacity > 0.12 && now >= m.nextSwapAt) {
+      const r = m.rng()
+      const next: MagicMirrorVariant = devFlags.mirrorTest
+        ? (m.swapCount % 2 === 0 ? 'ghost' : 'demon')
+        : (r < 0.16 ? 'demon' : (r < 0.54 ? 'ghost' : 'self'))
+      m.swapCount++
+      m.current = next
+      appMat.map = (magicMirrorTextures?.[next]) ?? appMat.map
+      m.nextSwapAt = devFlags.mirrorTest
+        ? (now + 0.45 + m.rng() * 0.35)
+        : (now + 1.15 + m.rng() * (next === 'demon' ? 3.8 : 3.2))
+    }
+  }
+}
+
+function attachE2EDebugApi() {
+  if (!import.meta.env.DEV)
+    return
+  if (!devFlags.e2e)
+    return
+  if (typeof window === 'undefined')
+    return
+
+  const w = window as any
+  if (!w.__FIND_GOLD_E2E__)
+    w.__FIND_GOLD_E2E__ = {}
+
+  w.__FIND_GOLD_E2E__.flee3d = {
+    constants: {
+      cellSize,
+      wallThickness,
+      wallHeight,
+      mirrorEps: 0.0025,
+    },
+    getMazeMeta: () => {
+      const snap = getMazeSnapshot()
+      return { level: n.value, cols: snap.cols, rows: snap.rows }
+    },
+    getGodCameraFrustum: () => {
+      if (!godCamera)
+        return null
+      return { left: godCamera.left, right: godCamera.right, top: godCamera.top, bottom: godCamera.bottom }
+    },
+    nextLevel: () => {
+      n.value++
+      steps.value = 0
+      setup()
+      start3DLevel()
+      win.value = false
+      return true
+    },
+    getMirrors: () => magicMirrors.map((m) => {
+      m.group.getWorldPosition(mirrorV0)
+      mirrorBox.setFromObject(m.group)
+      const nx = m.normal.x
+      const nz = m.normal.z
+      const i = Math.max(0, Math.floor(mirrorV0.x / cellSize))
+      const j = Math.max(0, Math.floor(mirrorV0.z / cellSize))
+      let wallFaceDelta = 0
+      if (nz === 1) {
+        const wallFace = j * cellSize + wallThickness
+        wallFaceDelta = mirrorV0.z - wallFace
+      }
+      else if (nz === -1) {
+        const wallFace = (j + 1) * cellSize - wallThickness
+        wallFaceDelta = wallFace - mirrorV0.z
+      }
+      else if (nx === 1) {
+        const wallFace = i * cellSize + wallThickness
+        wallFaceDelta = mirrorV0.x - wallFace
+      }
+      else if (nx === -1) {
+        const wallFace = (i + 1) * cellSize - wallThickness
+        wallFaceDelta = wallFace - mirrorV0.x
+      }
+      return {
+        x: mirrorV0.x,
+        y: mirrorV0.y,
+        z: mirrorV0.z,
+        nx: m.normal.x,
+        ny: m.normal.y,
+        nz: m.normal.z,
+        visible: m.group.visible,
+        variant: m.current,
+        opacity: (m.apparition.material as THREE.MeshBasicMaterial).opacity,
+        swapCount: m.swapCount,
+        nextSwapAt: m.nextSwapAt,
+        bbox: {
+          minX: mirrorBox.min.x,
+          minY: mirrorBox.min.y,
+          minZ: mirrorBox.min.z,
+          maxX: mirrorBox.max.x,
+          maxY: mirrorBox.max.y,
+          maxZ: mirrorBox.max.z,
+        },
+        wallFaceDelta,
+      }
+    }),
+    setFunMirrors: (v: boolean) => {
+      funMirrors.value = !!v
+    },
+    setGodView: (v: boolean) => {
+      godView.value = !!v
+    },
+    teleportAndLookAtMirror: (index = 0, distance = 0.68) => {
+      const m = magicMirrors[index]
+      if (!m)
+        return false
+      if (godView.value)
+        godView.value = false
+
+      m.group.getWorldPosition(mirrorV0)
+      player.x = mirrorV0.x + m.normal.x * distance
+      player.z = mirrorV0.z + m.normal.z * distance
+      player.y = 0.55
+
+      mirrorV1.set(player.x, player.y, player.z)
+      mirrorV2.copy(mirrorV0).sub(mirrorV1)
+      const len = mirrorV2.length() || 1
+      mirrorV2.multiplyScalar(1 / len)
+
+      const nextYaw = Math.atan2(-mirrorV2.x, -mirrorV2.z)
+      const nextPitch = Math.atan2(mirrorV2.y, Math.sqrt(mirrorV2.x * mirrorV2.x + mirrorV2.z * mirrorV2.z))
+      yaw = nextYaw
+      pitch = nextPitch
+      yawTarget = nextYaw
+      pitchTarget = nextPitch
+      setCameraPose()
+      return true
+    },
+    forceSwapNow: (index = 0) => {
+      const m = magicMirrors[index]
+      if (!m || !clock)
+        return false
+      m.nextSwapAt = clock.elapsedTime - 0.01
+      return true
+    },
+  }
+}
+
 function animate() {
   raf = requestAnimationFrame(animate)
   if (!renderer || !scene || !camera || !clock)
@@ -1259,7 +2060,7 @@ function animate() {
 
   const dt = Math.min(0.04, clock.getDelta())
 
-  const canMove = !paused.value && !isInputLocked() && (locked.value || godView.value)
+  const canMove = !paused.value && !isInputLocked() && (locked.value || godView.value || touchActive.value)
   if (canMove) {
     const forward = godView.value
       ? new THREE.Vector3(0, 0, -1)
@@ -1271,7 +2072,7 @@ function animate() {
     const move = new THREE.Vector3(0, 0, 0)
     const sprint = keys.has('ShiftLeft')
     const speed = sprint ? 3.2 : 1.9
-    if (keys.has('KeyW'))
+    if (keys.has('KeyW') || (touchActive.value && touchForward))
       move.add(forward)
     if (keys.has('KeyS'))
       move.addScaledVector(forward, -1)
@@ -1335,6 +2136,7 @@ function animate() {
 
   setCameraPose()
   updateTorchAim()
+  updateMagicMirrors(dt)
 
   if (import.meta.env.DEV && debugTorch.value && fpsCamera && flashlight) {
     debugRaycaster.setFromCamera(debugNdc, fpsCamera)
@@ -1360,12 +2162,24 @@ onMounted(() => {
   if (!goldArray.value.length)
     setup()
 
+  touchPreferred.value = typeof window !== 'undefined'
+    && (() => {
+      const coarse = !!window.matchMedia?.('(pointer: coarse)')?.matches
+      const fine = !!window.matchMedia?.('(pointer: fine)')?.matches
+      if (fine)
+        return false
+      if (coarse)
+        return true
+      return (navigator.maxTouchPoints ?? 0) > 0
+    })()
+
   torchTest.value = typeof window !== 'undefined' && window.location.search.includes('torchTest=1')
   if (torchTest.value)
     godView.value = false
 
   initThree()
   applyViewState(godView.value)
+  attachE2EDebugApi()
 
   resizeObserver = new ResizeObserver(() => resize())
   if (rootEl.value)
@@ -1382,6 +2196,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   cancelAnimationFrame(raf)
+  resetTouchInput()
   resizeObserver?.disconnect()
   resizeObserver = null
   window.removeEventListener('resize', resize)
@@ -1441,6 +2256,14 @@ onBeforeUnmount(() => {
   hemiLight = null
   dirLight = null
   dirLight2 = null
+
+  disposeMagicMirrorTextures()
+  magicMirrors = []
+  if (import.meta.env.DEV && devFlags.e2e && typeof window !== 'undefined') {
+    const w = window as any
+    if (w.__FIND_GOLD_E2E__?.flee3d)
+      delete w.__FIND_GOLD_E2E__.flee3d
+  }
 })
 
 const exitHint = computed(() => {
@@ -1464,7 +2287,15 @@ const nearestGoldHint = computed(() => {
 
 <template>
   <div class="flee3d" :class="{ bump: bumping }">
-    <div ref="rootEl" class="three-root" @click="requestLock">
+    <div
+      ref="rootEl"
+      class="three-root"
+      @click="startPlay"
+      @pointerdown="onRootPointerDown"
+      @pointermove="onRootPointerMove"
+      @pointerup="onRootPointerUp"
+      @pointercancel="onRootPointerUp"
+    >
       <div class="hud">
         <div class="pill">
           <span class="label">Lv</span>
@@ -1494,6 +2325,9 @@ const nearestGoldHint = computed(() => {
       <pre v-if="debugTorch && !godView" class="debug-torch">{{ debugTorchText }}</pre>
       <div v-if="torchTest || !godView" class="crosshair" />
       <div v-if="torchTest && !godView" class="torch-aim" :style="torchAimStyle" />
+      <div v-if="touchActive && !paused && !godView" class="touch-hint">
+        长按前进 · 拖动转向
+      </div>
 
       <div v-if="paused && !godView" class="overlay">
         <div class="card">
@@ -1501,13 +2335,24 @@ const nearestGoldHint = computed(() => {
             3D 第一人称模式
           </div>
           <div class="desc">
-            点击画面进入（锁定鼠标）<br>
-            移动：WASD  冲刺：Shift<br>
-            转角：Q / E（顺滑转身）<br>
-            上帝视角：M<br>
-            退出：Esc
+            <template v-if="touchPreferred">
+              长按画面前进，拖动转向<br>
+              （建议横屏体验）<br>
+              上帝视角：M（仅键盘）
+            </template>
+            <template v-else>
+              点击画面进入（锁定鼠标）<br>
+              移动：WASD  冲刺：Shift<br>
+              转角：Q / E（顺滑转身）<br>
+              上帝视角：M<br>
+              退出：Esc
+            </template>
           </div>
-          <button class="btn" type="button">
+          <label class="mirror-toggle">
+            <input v-model="funMirrors" type="checkbox">
+            <span>趣味镜子（偶尔出现“自己”）</span>
+          </label>
+          <button class="btn" type="button" @click.stop="startPlay">
             点击开始
           </button>
         </div>
@@ -1545,6 +2390,7 @@ const nearestGoldHint = computed(() => {
   overflow: hidden;
   background: rgba(0, 0, 0, 0.25);
   border: 1px solid rgba(255, 255, 255, 0.08);
+  touch-action: none;
 }
 
 .hud {
@@ -1595,6 +2441,25 @@ const nearestGoldHint = computed(() => {
   filter: drop-shadow(0 6px 8px rgba(0, 0, 0, 0.5));
 }
 
+.mirror-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(0, 0, 0, 0.22);
+  color: rgba(255, 255, 255, 0.9);
+  margin: 12px 0 4px;
+  user-select: none;
+}
+
+.mirror-toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: #38bdf8;
+}
+
 .crosshair {
   position: absolute;
   left: 50%;
@@ -1607,6 +2472,24 @@ const nearestGoldHint = computed(() => {
   box-shadow: 0 0 16px rgba(255, 255, 255, 0.15);
   z-index: 5;
   pointer-events: none;
+}
+
+.touch-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  z-index: 6;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(8px);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+  letter-spacing: 0.2px;
+  pointer-events: none;
+  user-select: none;
 }
 
 .torch-aim {
